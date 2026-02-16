@@ -1,54 +1,59 @@
+// App.jsx
 import { useState } from "react";
-import ImageUploader from "./components/ImageUploader";
-import ImageCropper from "./components/ImageCropper";
-import Scene3D from "./components/Scene3D";
+import Header from "./components/Header";
+import TransitionOverlay from "./components/TransitionOverlay";
 
-function App() {
-  const [uploadedImage, setUploadedImage] = useState(null);
-  const [croppedImage, setCroppedImage] = useState(null);
+export default function App() {
+  const [currentSection, setCurrentSection] = useState("home");
+  const [transitioning, setTransitioning] = useState(false);
+  const [trigger, setTrigger] = useState(0);
+
+  const changeSection = (nextSection) => {
+    if (transitioning || nextSection === currentSection) return;
+
+    setTransitioning(true);
+    setTrigger((prev) => prev + 1); // trigger 증가
+
+    // 트랜지션 중간(완전히 검정화면)에 섹션 변경
+    setTimeout(() => {
+      setCurrentSection(nextSection);
+    }, 1250); // 2500ms의 절반 = 중간 지점
+
+    // 트랜지션 완료 후 상태 리셋
+    setTimeout(() => {
+      setTransitioning(false);
+    }, 2500);
+  };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      {!croppedImage ? (
-        <div className="max-w-2xl mx-auto py-8">
-          <h1 className="text-3xl font-bold text-center mb-8">
-            Image 3D Viewer
-          </h1>
-          <div className="bg-white rounded-lg shadow-lg">
-            {!uploadedImage ? (
-              <ImageUploader onImageLoad={setUploadedImage} />
-            ) : (
-              <ImageCropper
-                imageSrc={uploadedImage}
-                onCropComplete={setCroppedImage}
-              />
-            )}
-          </div>
-          {uploadedImage && (
-            <button
-              onClick={() => setUploadedImage(null)}
-              className="mt-4 text-blue-600 hover:underline"
-            >
-              ← 다른 이미지 선택
-            </button>
-          )}
-        </div>
-      ) : (
-        <div>
-          <button
-            onClick={() => {
-              setCroppedImage(null);
-              setUploadedImage(null);
-            }}
-            className="absolute top-4 left-4 z-10 bg-white px-4 py-2 rounded shadow hover:bg-gray-100"
-          >
-            ← 처음으로
-          </button>
-          <Scene3D croppedImage={croppedImage} />
-        </div>
-      )}
+    <div className="min-h-screen">
+      <Header currentSection={currentSection} onSectionChange={changeSection} />
+
+      <main>
+        {currentSection === "home" && (
+          <section className="min-h-screen p-8">
+            <h1 className="text-4xl font-bold">Home Section</h1>
+            {/* Home 콘텐츠 */}
+          </section>
+        )}
+
+        {currentSection === "custom" && (
+          <section className="min-h-screen p-8 bg-gray-100">
+            <h1 className="text-4xl font-bold">Custom Section</h1>
+            {/* Custom 콘텐츠 */}
+          </section>
+        )}
+
+        {currentSection === "about" && (
+          <section className="min-h-screen p-8">
+            <h1 className="text-4xl font-bold">About Section</h1>
+            {/* About 콘텐츠 */}
+          </section>
+        )}
+      </main>
+
+      {/* Transition Shader Overlay */}
+      <TransitionOverlay trigger={trigger} />
     </div>
   );
 }
-
-export default App;
