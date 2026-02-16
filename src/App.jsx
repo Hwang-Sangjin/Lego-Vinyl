@@ -1,6 +1,9 @@
 import { useState } from "react";
 import Header from "./components/Header";
 import TransitionOverlay from "./components/TransitionOverlay";
+import Home from "./sections/Home";
+import Custom from "./sections/Custom";
+import About from "./sections/About";
 
 export default function App() {
   const [currentSection, setCurrentSection] = useState("home");
@@ -29,23 +32,11 @@ export default function App() {
       <Header currentSection={currentSection} onSectionChange={changeSection} />
 
       <main>
-        {currentSection === "home" && (
-          <section className="min-h-screen p-8">
-            <h1 className="text-4xl font-bold">Home Section</h1>
-          </section>
-        )}
+        {currentSection === "home" && <Home />}
 
-        {currentSection === "custom" && (
-          <section className="min-h-screen p-8 bg-gray-100">
-            <h1 className="text-4xl font-bold">Custom Section</h1>
-          </section>
-        )}
+        {currentSection === "custom" && <Custom />}
 
-        {currentSection === "about" && (
-          <section className="min-h-screen p-8">
-            <h1 className="text-4xl font-bold">About Section</h1>
-          </section>
-        )}
+        {currentSection === "about" && <About />}
       </main>
 
       <TransitionOverlay trigger={trigger} />

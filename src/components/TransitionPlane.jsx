@@ -141,7 +141,7 @@ const TransitionPlaneContent = ({
   trigger,
   backgroundColor = "#000000",
   colors = LEGO_COLORS,
-  gridSize = 30.0,
+  gridSize = 50.0,
   patternImage = legoImg,
   onReady,
 }) => {
