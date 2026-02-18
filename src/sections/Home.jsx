@@ -1,15 +1,12 @@
 import React from "react";
 import Banner from "/image/MainBanner.webp";
+import HeroSection from "../components/HeroSection";
 
 const Home = () => {
   return (
-    <section className="min-h-screen p-0">
-      <img
-        src={Banner}
-        alt="Main Banner"
-        className="w-full h-full object-cover"
-      />
-    </section>
+    <div>
+      <HeroSection />
+    </div>
   );
 };
 
