@@ -48,7 +48,7 @@ async function sampleImageToColors({ src, size }) {
   return colors;
 }
 
-// 베이스플레이트 텍스처(크림 톤에 맞게 아주 은은하게)
+// 베이스플레이트 텍스처(크림 톤)
 function useBaseplateTexture() {
   return useMemo(() => {
     const c = document.createElement("canvas");
@@ -56,7 +56,7 @@ function useBaseplateTexture() {
     c.height = 256;
     const ctx = c.getContext("2d");
 
-    ctx.fillStyle = "#efe4d3"; // 크림보다 살짝 어두운 톤
+    ctx.fillStyle = "#efe4d3";
     ctx.fillRect(0, 0, c.width, c.height);
 
     // stud 점무늬를 아주 은은하게
@@ -101,12 +101,9 @@ function useStudBrickGeometry(brickSize) {
       studRadius,
       studHeight,
       18,
+      1,
     );
-    // stud을 위로 올림
     stud.translate(0, height / 2 + studHeight / 2, 0);
-
-    // 살짝 모서리 느낌(너무 각지면 장난감 느낌이 덜 나서)
-    // (정교한 bevel은 비용 커서 여기선 생략)
 
     const merged = mergeGeometries([box, stud], false);
     merged.computeVertexNormals();
@@ -116,7 +113,7 @@ function useStudBrickGeometry(brickSize) {
 
 function BrickMosaicBackground({
   imageUrl = "/covers/sample.jpg",
-  grid = 44, // 배경이니까 조금 크게. 모바일 고려하면 36~44 권장
+  grid = 32,
   brickSize = 0.18,
   gap = 0.012,
   fallDuration = 1.2,
@@ -129,30 +126,35 @@ function BrickMosaicBackground({
   // 카메라/마우스 패럴랙스
   const pointerTarget = useRef({ x: 0, y: 0 });
 
-  const { positions, delays, startHeights, total, step, half } = useMemo(() => {
-    const total = grid * grid;
-    const positions = new Array(total);
-    const delays = new Float32Array(total);
-    const startHeights = new Float32Array(total);
+  const { positions, delays, startHeights, total, step, maxDelay } =
+    useMemo(() => {
+      const total = grid * grid;
+      const positions = new Array(total);
+      const delays = new Float32Array(total);
+      const startHeights = new Float32Array(total);
 
-    const step = brickSize + gap;
-    const half = (grid - 1) * step * 0.5;
+      const step = brickSize + gap;
+      const half = (grid - 1) * step * 0.5;
 
-    for (let y = 0; y < grid; y++) {
-      for (let x = 0; x < grid; x++) {
-        const i = y * grid + x;
-        const px = x * step - half;
-        const pz = y * step - half;
+      let maxDelay = 0;
 
-        positions[i] = new THREE.Vector3(px, 0, pz);
+      for (let y = 0; y < grid; y++) {
+        for (let x = 0; x < grid; x++) {
+          const i = y * grid + x;
+          const px = x * step - half;
+          const pz = y * step - half;
 
-        // “레트로 차분” 느낌: 너무 랜덤보다 약간의 정렬감이 좋음
-        delays[i] = (y / grid) * 0.9 + Math.random() * 0.25;
-        startHeights[i] = 0.9 + Math.random() * scatter;
+          positions[i] = new THREE.Vector3(px, 0, pz);
+
+          const d = (y / grid) * 0.9 + Math.random() * 0.25;
+          delays[i] = d;
+          if (d > maxDelay) maxDelay = d;
+
+          startHeights[i] = 0.9 + Math.random() * scatter;
+        }
       }
-    }
-    return { positions, delays, startHeights, total, step, half };
-  }, [grid, brickSize, gap, scatter]);
+      return { positions, delays, startHeights, total, step, maxDelay };
+    }, [grid, brickSize, gap, scatter]);
 
   // 색 샘플링
   useEffect(() => {
@@ -160,7 +162,6 @@ function BrickMosaicBackground({
     sampleImageToColors({ src: imageUrl, size: grid })
       .then((cols) => alive && setColors(cols))
       .catch(() => {
-        // fallback: 크림 톤에 어울리는 muted 컬러 그라데이션
         const fallback = new Array(grid * grid).fill(0).map((_, i) => {
           const x = (i % grid) / (grid - 1);
           const y = Math.floor(i / grid) / (grid - 1);
@@ -184,15 +185,68 @@ function BrickMosaicBackground({
 
   const baseplateTex = useBaseplateTexture();
   const brickGeo = useStudBrickGeometry(brickSize);
-
   const tempObj = useMemo(() => new THREE.Object3D(), []);
-  const doneRef = useRef(false);
+
+  // =========================================================
+  // ✅ 파동 시뮬레이션 버퍼 (h, v)
+  // =========================================================
+  const heightRef = useRef(null);
+  const velRef = useRef(null);
+
+  useEffect(() => {
+    heightRef.current = new Float32Array(total);
+    velRef.current = new Float32Array(total);
+  }, [total]);
+
+  // 파동 튜닝
+  const AMPLITUDE = brickSize * 0.55; // 파동 높이
+  const IMPULSE = 1.25; // 마우스 충격 강도
+  const RADIUS = 2; // 충격 퍼짐 반경(2~3)
+  const SPRING = 35.0; // 전파 강도
+  const DAMPING = 6.5; // 감쇠
+  const buildDoneTime = maxDelay + fallDuration + 0.05;
+
+  const addImpulse = (cx, cy, strength = IMPULSE) => {
+    const h = heightRef.current;
+    const v = velRef.current;
+    if (!h || !v) return;
+
+    for (let dy = -RADIUS; dy <= RADIUS; dy++) {
+      for (let dx = -RADIUS; dx <= RADIUS; dx++) {
+        const x = cx + dx;
+        const y = cy + dy;
+        if (x < 0 || x >= grid || y < 0 || y >= grid) continue;
+
+        const dist2 = dx * dx + dy * dy;
+        if (dist2 > RADIUS * RADIUS) continue;
+
+        const w = Math.exp(-dist2 / (RADIUS * RADIUS * 0.6));
+        const idx = y * grid + x;
+
+        // 속도에 충격
+        v[idx] += strength * w;
+      }
+    }
+  };
+
+  // ✅ instancedMesh hover id로 충격 주기
+  const onMove = (e) => {
+    e.stopPropagation();
+    const id = e.instanceId;
+    if (id == null) return;
+
+    const cx = id % grid;
+    const cy = Math.floor(id / grid);
+    addImpulse(cx, cy, IMPULSE);
+  };
 
   useFrame(({ clock, pointer }) => {
+    const dt = Math.min(clock.getDelta(), 0.033);
+    const t = clock.getElapsedTime();
+
     pointerTarget.current.x = pointer.x * 0.22;
     pointerTarget.current.y = pointer.y * 0.14;
 
-    // 배경 느낌: 과한 회전은 줄이고 “은은한 움직임”
     if (groupRef.current) {
       groupRef.current.rotation.y = THREE.MathUtils.lerp(
         groupRef.current.rotation.y,
@@ -206,26 +260,57 @@ function BrickMosaicBackground({
       );
     }
 
-    if (!instRef.current || doneRef.current) return;
+    if (!instRef.current) return;
 
-    const t = clock.getElapsedTime();
-    let allDone = true;
+    // 파동 업데이트
+    const h = heightRef.current;
+    const v = velRef.current;
 
+    if (h && v) {
+      for (let y = 0; y < grid; y++) {
+        for (let x = 0; x < grid; x++) {
+          const i = y * grid + x;
+          const center = h[i];
+
+          const left = x > 0 ? h[i - 1] : center;
+          const right = x < grid - 1 ? h[i + 1] : center;
+          const up = y > 0 ? h[i - grid] : center;
+          const down = y < grid - 1 ? h[i + grid] : center;
+
+          const lap = left + right + up + down - 4 * center;
+          v[i] += (lap * SPRING - v[i] * DAMPING) * dt;
+        }
+      }
+
+      for (let i = 0; i < total; i++) {
+        h[i] += v[i] * dt;
+      }
+    }
+
+    const isBuildPhase = t < buildDoneTime;
+
+    // 인스턴스 매트릭스 업데이트(빌드 낙하 + 파동)
     for (let i = 0; i < total; i++) {
-      const localT = (t - delays[i]) / fallDuration;
-      const clamped = clamp01(localT);
-      if (clamped < 1) allDone = false;
+      let baseY = 0;
 
-      const eased = easeOutBack(clamped);
-      const y = THREE.MathUtils.lerp(startHeights[i], 0, eased);
+      if (isBuildPhase) {
+        const localT = (t - delays[i]) / fallDuration;
+        const c = clamp01(localT);
+        const eased = easeOutBack(c);
+        baseY = THREE.MathUtils.lerp(startHeights[i], 0, eased);
+      }
+
+      const waveY = h ? h[i] * AMPLITUDE : 0;
 
       tempObj.position.copy(positions[i]);
-      tempObj.position.y = y;
+      tempObj.position.y = baseY + waveY;
 
-      const s =
-        clamped < 1
-          ? THREE.MathUtils.lerp(0.88, 1.0, easeOutCubic(clamped))
-          : 1.0;
+      let s = 1.0;
+      if (isBuildPhase) {
+        const localT = (t - delays[i]) / fallDuration;
+        const c = clamp01(localT);
+        s = c < 1 ? THREE.MathUtils.lerp(0.88, 1.0, easeOutCubic(c)) : 1.0;
+      }
       tempObj.scale.setScalar(s);
 
       tempObj.updateMatrix();
@@ -233,11 +318,10 @@ function BrickMosaicBackground({
     }
 
     instRef.current.instanceMatrix.needsUpdate = true;
-    if (allDone) doneRef.current = true; // 완성 후 CPU 업데이트 멈춤
   });
 
-  // 베이스플레이트 크기(브릭보다 여유 있게)
-  const planeSize = grid * step + 1.0;
+  // ✅ 베이스플레이트 크기: 브릭 외곽에 딱 맞춤
+  const planeSize = (grid - 1) * step + brickSize;
 
   return (
     <group ref={groupRef} position={[0, -0.25, 0]}>
@@ -262,8 +346,15 @@ function BrickMosaicBackground({
         args={[brickGeo, null, total]}
         castShadow
         receiveShadow
+        onPointerMove={onMove}
       >
-        <meshStandardMaterial roughness={0.45} metalness={0.03} />
+        <meshPhysicalMaterial
+          roughness={0.22}
+          metalness={0.02}
+          clearcoat={0.65}
+          clearcoatRoughness={0.25}
+          reflectivity={0.35}
+        />
       </instancedMesh>
     </group>
   );
@@ -279,39 +370,39 @@ export default function HeroSectionCream() {
         overflow: "hidden",
       }}
     >
-      {/* ✅ Full-bleed 3D background */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          zIndex: 0,
-        }}
-      >
+      {/* Full-bleed 3D background */}
+      <div style={{ position: "absolute", inset: 0, zIndex: 0 }}>
         <Canvas
           shadows
-          dpr={[1, 1.75]}
-          camera={{ position: [0.3, 20, 2.15], fov: 40 }}
-          gl={{ antialias: true }}
+          dpr={[1, 2]}
+          // ✅ 너무 위에서 보면 파동이 안 보임: y=1.45 추천
+          camera={{ position: [0.3, 20, 2.0], fov: 38 }}
+          gl={{ antialias: true, powerPreference: "high-performance" }}
+          onCreated={({ gl }) => {
+            gl.toneMappingExposure = 1.15;
+          }}
         >
-          {/* 배경색을 캔버스에 맞춰 통일 */}
           <color attach="background" args={["#f5ede0"]} />
 
-          {/* 레트로/차분: 강한 대비 X, 부드러운 라이트 */}
-          <ambientLight intensity={0.55} />
-          <directionalLight
-            position={[2.8, 4.2, 2.2]}
-            intensity={1.05}
-            castShadow
-            shadow-mapSize-width={1024}
-            shadow-mapSize-height={1024}
-          />
-          <directionalLight position={[-3.5, 2.2, -2.2]} intensity={0.35} />
+          <ambientLight intensity={0.25} />
 
-          <Environment preset="sunset" />
+          <directionalLight
+            position={[3.2, 5.0, 2.6]}
+            intensity={1.35}
+            castShadow
+            shadow-mapSize-width={2048}
+            shadow-mapSize-height={2048}
+            shadow-bias={-0.00025}
+          />
+
+          <directionalLight position={[-3.5, 2.0, -1.8]} intensity={0.45} />
+          <directionalLight position={[0.0, 2.8, -4.2]} intensity={0.55} />
+          {/* 
+          <Environment preset="studio" /> */}
 
           <BrickMosaicBackground
             imageUrl="/covers/sample.jpg"
-            grid={44}
+            grid={32}
             brickSize={0.18}
             gap={0.012}
             fallDuration={1.2}
@@ -319,7 +410,7 @@ export default function HeroSectionCream() {
           />
         </Canvas>
 
-        {/* 아주 얇은 필름 그레인/종이 질감 느낌(선택) */}
+        {/* 필름 느낌(너무 세면 인터랙션이 탁해 보임) */}
         <div
           style={{
             position: "absolute",
@@ -329,12 +420,12 @@ export default function HeroSectionCream() {
               "radial-gradient(800px 500px at 30% 20%, rgba(255,255,255,0.35), transparent 60%)," +
               "radial-gradient(900px 600px at 70% 80%, rgba(0,0,0,0.06), transparent 60%)",
             mixBlendMode: "multiply",
-            opacity: 0.85,
+            opacity: 0.18, // ✅ 0.85 -> 0.18
           }}
         />
       </div>
 
-      {/* ✅ Overlay content */}
+      {/* Overlay content (✅ Canvas에 이벤트가 가도록 pointerEvents 처리) */}
       <div
         style={{
           position: "relative",
@@ -343,6 +434,7 @@ export default function HeroSectionCream() {
           display: "grid",
           alignItems: "center",
           padding: "7rem 6vw",
+          pointerEvents: "none", // ✅ 전체는 통과
         }}
       >
         <div style={{ maxWidth: 640 }}>
@@ -388,7 +480,15 @@ export default function HeroSectionCream() {
             vinyl-ready cover kit.
           </p>
 
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          {/* ✅ 버튼/링크만 클릭 가능 */}
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+              pointerEvents: "auto",
+            }}
+          >
             <a
               href="/custom"
               style={{
