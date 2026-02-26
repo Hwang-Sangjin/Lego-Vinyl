@@ -158,7 +158,7 @@ const TransitionPlaneContent = ({
   trigger,
   backgroundColor = "#000000",
   colors,
-  gridSize = 50.0,
+  gridSize = 75.0,
   patternImage = legoImg,
   onReady,
   onCovered, // 화면이 완전히 가려진 순간 호출 → 여기서 페이지 전환
