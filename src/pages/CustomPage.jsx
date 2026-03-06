@@ -67,7 +67,6 @@ function nearestLegoColor(r, g, b) {
 }
 
 function pixelateFromCrop(imgEl, cropPx) {
-  // cropPx: { x, y, size } — 원본 이미지 기준 픽셀 좌표
   const SIZE = 32;
   const canvas = document.createElement("canvas");
   canvas.width = SIZE;
@@ -75,11 +74,9 @@ function pixelateFromCrop(imgEl, cropPx) {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(imgEl, cropPx.x, cropPx.y, cropPx.size, cropPx.size, 0, 0, SIZE, SIZE);
   const { data } = ctx.getImageData(0, 0, SIZE, SIZE);
-  const pixels = [];
-  for (let i = 0; i < SIZE * SIZE; i++) {
-    pixels.push(nearestLegoColor(data[i*4], data[i*4+1], data[i*4+2]));
-  }
-  return pixels;
+  return Array.from({ length: SIZE * SIZE }, (_, i) =>
+    nearestLegoColor(data[i*4], data[i*4+1], data[i*4+2])
+  );
 }
 
 function countColors(pixels) {
@@ -89,25 +86,16 @@ function countColors(pixels) {
 }
 
 /* ══════════════════════════════════
-   ImageCropper 컴포넌트
-   — 이미지 위에 정사각형 크롭 박스
+   ImageCropper
 ══════════════════════════════════ */
-const MIN_CROP_DISPLAY = 60; // 화면상 최소 크롭 박스 px
+const MIN_CROP = 60;
 
 function ImageCropper({ imageUrl, naturalSize, onApply }) {
   const containerRef = useRef(null);
   const [displaySize, setDisplaySize] = useState({ w: 0, h: 0 });
-
-  // 크롭 박스 (화면 좌표 기준)
   const [crop, setCrop] = useState(null);
-
-  // 드래그 상태
   const dragState = useRef(null);
-  // move: 박스 전체 이동
-  // resize: 핸들로 리사이즈
-  // new: 새 박스 그리기
 
-  /* 컨테이너 크기 감지 */
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -119,7 +107,6 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
     return () => ro.disconnect();
   }, []);
 
-  /* 이미지 로드되면 초기 크롭 박스 설정 (중앙 정사각형) */
   useEffect(() => {
     if (!displaySize.w || !displaySize.h) return;
     const side = Math.min(displaySize.w, displaySize.h) * 0.65;
@@ -130,48 +117,40 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
     });
   }, [displaySize.w, displaySize.h]);
 
-  /* 화면 → 원본 이미지 좌표 변환 */
   function toNaturalCrop(c) {
     const scaleX = naturalSize.w / displaySize.w;
     const scaleY = naturalSize.h / displaySize.h;
-    const scale  = Math.max(scaleX, scaleY); // object-fit: contain 역산
-
-    // contain일 때 실제 렌더 크기
+    const scale  = Math.max(scaleX, scaleY);
     const renderedW = naturalSize.w / scale;
     const renderedH = naturalSize.h / scale;
     const offsetX   = (displaySize.w - renderedW) / 2;
     const offsetY   = (displaySize.h - renderedH) / 2;
-
     const nx = (c.x - offsetX) * scale;
     const ny = (c.y - offsetY) * scale;
     const ns = c.size * scale;
-
     return {
       x:    Math.max(0, Math.round(nx)),
       y:    Math.max(0, Math.round(ny)),
-      size: Math.round(Math.min(ns, naturalSize.w - Math.max(0, nx), naturalSize.h - Math.max(0, ny))),
+      size: Math.round(Math.min(ns,
+        naturalSize.w - Math.max(0, nx),
+        naturalSize.h - Math.max(0, ny)
+      )),
     };
   }
 
-  /* ── 마우스/터치 핸들러 ── */
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
   const getXY = (e) => {
     const rect = containerRef.current.getBoundingClientRect();
     const src  = e.touches ? e.touches[0] : e;
     return { x: src.clientX - rect.left, y: src.clientY - rect.top };
   };
 
-  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-
   const onPointerDown = useCallback((e, mode, handleDir) => {
     e.preventDefault();
     e.stopPropagation();
     const pt = getXY(e);
-    dragState.current = {
-      mode,
-      handleDir,
-      startPt: pt,
-      startCrop: { ...crop },
-    };
+    dragState.current = { mode, handleDir, startPt: pt, startCrop: { ...crop } };
 
     const onMove = (ev) => {
       if (!dragState.current) return;
@@ -189,33 +168,28 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
           size: sc.size,
         });
       } else if (dragState.current.mode === "resize") {
-        // 정사각형 유지: dx/dy 중 더 큰 쪽 사용
-        const dir  = dragState.current.handleDir;
-        let delta  = 0;
-
-        if (dir === "se") delta = Math.max(dx, dy);
-        if (dir === "sw") delta = Math.max(-dx, dy);
-        if (dir === "ne") delta = Math.max(dx, -dy);
-        if (dir === "nw") delta = Math.max(-dx, -dy);
-
-        const newSize = clamp(sc.size + delta, MIN_CROP_DISPLAY, Math.min(W, H));
+        const dir   = dragState.current.handleDir;
+        let delta   = dir === "se" ? Math.max(dx, dy)
+                    : dir === "sw" ? Math.max(-dx, dy)
+                    : dir === "ne" ? Math.max(dx, -dy)
+                    : Math.max(-dx, -dy);
+        const newSize = clamp(sc.size + delta, MIN_CROP, Math.min(W, H));
         let nx = sc.x, ny = sc.y;
-
         if (dir === "sw" || dir === "nw") nx = sc.x + sc.size - newSize;
         if (dir === "ne" || dir === "nw") ny = sc.y + sc.size - newSize;
-
         setCrop({
           x:    clamp(nx, 0, W - newSize),
           y:    clamp(ny, 0, H - newSize),
           size: newSize,
         });
       } else if (dragState.current.mode === "new") {
-        // 새 박스 그리기
         const raw  = Math.min(Math.abs(dx), Math.abs(dy), W, H);
-        const size = Math.max(MIN_CROP_DISPLAY, raw);
-        const x    = clamp(dx >= 0 ? sc.x : sc.x - size, 0, W - size);
-        const y    = clamp(dy >= 0 ? sc.y : sc.y - size, 0, H - size);
-        setCrop({ x, y, size });
+        const size = Math.max(MIN_CROP, raw);
+        setCrop({
+          x:    clamp(dx >= 0 ? sc.x : sc.x - size, 0, W - size),
+          y:    clamp(dy >= 0 ? sc.y : sc.y - size, 0, H - size),
+          size,
+        });
       }
     };
 
@@ -233,48 +207,43 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
     window.addEventListener("touchend",  onUp);
   }, [crop, displaySize]);
 
-  /* 핸들 위치 */
   const handles = crop ? [
-    { dir: "nw", cx: crop.x,              cy: crop.y              },
-    { dir: "ne", cx: crop.x + crop.size,  cy: crop.y              },
-    { dir: "sw", cx: crop.x,              cy: crop.y + crop.size  },
-    { dir: "se", cx: crop.x + crop.size,  cy: crop.y + crop.size  },
+    { dir: "nw", cx: crop.x,             cy: crop.y             },
+    { dir: "ne", cx: crop.x + crop.size, cy: crop.y             },
+    { dir: "sw", cx: crop.x,             cy: crop.y + crop.size },
+    { dir: "se", cx: crop.x + crop.size, cy: crop.y + crop.size },
   ] : [];
 
-  const HANDLE_R = 7;
+  const HANDLE_R = 8;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* 크롭 캔버스 영역 */}
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div
         ref={containerRef}
         onMouseDown={(e) => {
           if (dragState.current) return;
           const pt = getXY(e);
-          // 박스 안쪽이면 이동, 바깥이면 새로 그리기
           if (crop &&
             pt.x >= crop.x && pt.x <= crop.x + crop.size &&
             pt.y >= crop.y && pt.y <= crop.y + crop.size) {
             onPointerDown(e, "move", null);
           } else {
-            const fakeCrop = { x: pt.x, y: pt.y, size: MIN_CROP_DISPLAY };
-            setCrop(fakeCrop);
+            setCrop({ x: pt.x, y: pt.y, size: MIN_CROP });
             onPointerDown(e, "new", null);
           }
         }}
         style={{
           position: "relative",
           width: "100%",
-          aspectRatio: "1",
-          borderRadius: 12,
+          aspectRatio: "1 / 1",
+          borderRadius: 16,
           overflow: "hidden",
           border: `1px solid ${T.sand}`,
           cursor: "crosshair",
-          background: T.creamDark,
+          background: T.ink,  /* 이미지 바깥 영역 */
           userSelect: "none",
         }}
       >
-        {/* 원본 이미지 */}
         <img
           src={imageUrl}
           alt="crop source"
@@ -290,17 +259,13 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
 
         {crop && (
           <>
-            {/* 어두운 오버레이 4방향 */}
-            {/* 위 */}
-            <div style={{ position:"absolute", left:0, top:0, width:"100%", height:crop.y, background:"rgba(20,18,16,0.5)", pointerEvents:"none" }} />
-            {/* 아래 */}
-            <div style={{ position:"absolute", left:0, top:crop.y+crop.size, width:"100%", bottom:0, height:`calc(100% - ${crop.y+crop.size}px)`, background:"rgba(20,18,16,0.5)", pointerEvents:"none" }} />
-            {/* 왼쪽 */}
-            <div style={{ position:"absolute", left:0, top:crop.y, width:crop.x, height:crop.size, background:"rgba(20,18,16,0.5)", pointerEvents:"none" }} />
-            {/* 오른쪽 */}
-            <div style={{ position:"absolute", left:crop.x+crop.size, top:crop.y, width:`calc(100% - ${crop.x+crop.size}px)`, height:crop.size, background:"rgba(20,18,16,0.5)", pointerEvents:"none" }} />
+            {/* 오버레이 4방향 */}
+            <div style={{ position:"absolute", left:0, top:0, width:"100%", height:crop.y, background:"rgba(20,18,16,0.6)", pointerEvents:"none" }} />
+            <div style={{ position:"absolute", left:0, top:crop.y+crop.size, width:"100%", height:`calc(100% - ${crop.y+crop.size}px)`, background:"rgba(20,18,16,0.6)", pointerEvents:"none" }} />
+            <div style={{ position:"absolute", left:0, top:crop.y, width:crop.x, height:crop.size, background:"rgba(20,18,16,0.6)", pointerEvents:"none" }} />
+            <div style={{ position:"absolute", left:crop.x+crop.size, top:crop.y, width:`calc(100% - ${crop.x+crop.size}px)`, height:crop.size, background:"rgba(20,18,16,0.6)", pointerEvents:"none" }} />
 
-            {/* 크롭 박스 테두리 */}
+            {/* 크롭 박스 */}
             <div style={{
               position: "absolute",
               left: crop.x, top: crop.y,
@@ -309,16 +274,33 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
               boxSizing: "border-box",
               pointerEvents: "none",
             }}>
-              {/* 룰 오브 서드 가이드라인 */}
+              {/* 룰 오브 서드 */}
               {[1/3, 2/3].map(r => (
                 <React.Fragment key={r}>
-                  <div style={{ position:"absolute", left:`${r*100}%`, top:0, width:1, height:"100%", background:"rgba(255,255,255,0.25)" }} />
-                  <div style={{ position:"absolute", top:`${r*100}%`, left:0, height:1, width:"100%", background:"rgba(255,255,255,0.25)" }} />
+                  <div style={{ position:"absolute", left:`${r*100}%`, top:0, width:1, height:"100%", background:"rgba(255,255,255,0.2)", pointerEvents:"none" }} />
+                  <div style={{ position:"absolute", top:`${r*100}%`, left:0, height:1, width:"100%", background:"rgba(255,255,255,0.2)", pointerEvents:"none" }} />
                 </React.Fragment>
+              ))}
+              {/* 모서리 장식 */}
+              {[
+                { top:0, left:0 },
+                { top:0, right:0 },
+                { bottom:0, left:0 },
+                { bottom:0, right:0 },
+              ].map((pos, i) => (
+                <div key={i} style={{
+                  position:"absolute", ...pos,
+                  width:12, height:12,
+                  borderTop: i < 2 ? `3px solid ${T.accent}` : "none",
+                  borderBottom: i >= 2 ? `3px solid ${T.accent}` : "none",
+                  borderLeft: (i === 0 || i === 2) ? `3px solid ${T.accent}` : "none",
+                  borderRight: (i === 1 || i === 3) ? `3px solid ${T.accent}` : "none",
+                  pointerEvents:"none",
+                }} />
               ))}
             </div>
 
-            {/* 리사이즈 핸들 4개 */}
+            {/* 핸들 */}
             {handles.map(({ dir, cx, cy }) => (
               <div
                 key={dir}
@@ -329,17 +311,26 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
                   width: HANDLE_R*2, height: HANDLE_R*2,
                   borderRadius: "50%",
                   background: T.accent,
-                  border: "2px solid #fff",
-                  cursor:
-                    dir === "nw" || dir === "se" ? "nwse-resize" : "nesw-resize",
+                  border: "2.5px solid #fff",
+                  cursor: dir === "nw" || dir === "se" ? "nwse-resize" : "nesw-resize",
                   zIndex: 10,
-                  boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
+                  transition: "transform 0.1s",
                 }}
+                onMouseEnter={e => e.target.style.transform = "scale(1.25)"}
+                onMouseLeave={e => e.target.style.transform = "scale(1)"}
               />
             ))}
           </>
         )}
       </div>
+
+      {/* 크롭 사이즈 표시 */}
+      {crop && (
+        <div style={{ fontSize:11, color:T.inkSubtle, textAlign:"center", letterSpacing:"0.1em" }}>
+          {Math.round(crop.size)} × {Math.round(crop.size)} px 선택됨
+        </div>
+      )}
 
       {/* Apply 버튼 */}
       <button
@@ -347,17 +338,20 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
         disabled={!crop}
         style={{
           width: "100%",
-          padding: "13px 0",
-          background: crop ? T.ink : T.sand,
-          color: crop ? T.cream : T.inkSubtle,
-          border: "none", borderRadius: 12,
-          fontSize: 13, letterSpacing: "0.06em",
+          padding: "14px 0",
+          background: T.ink,
+          color: T.cream,
+          border: "none",
+          borderRadius: 12,
+          fontSize: 13,
+          letterSpacing: "0.08em",
           fontFamily: "'DM Mono', monospace",
-          cursor: crop ? "pointer" : "default",
-          transition: "background 0.2s",
+          cursor: "pointer",
+          transition: "background 0.2s, transform 0.15s",
+          boxShadow: "0 4px 16px rgba(20,18,16,0.12)",
         }}
-        onMouseEnter={e => { if (crop) e.target.style.background = "#2a2520"; }}
-        onMouseLeave={e => { if (crop) e.target.style.background = T.ink; }}
+        onMouseEnter={e => { e.target.style.background = "#2a2520"; e.target.style.transform = "translateY(-1px)"; }}
+        onMouseLeave={e => { e.target.style.background = T.ink;     e.target.style.transform = "translateY(0)"; }}
       >
         Apply Crop & Pixelate →
       </button>
@@ -366,16 +360,16 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
 }
 
 /* ══════════════════════════════════
-   Custom 페이지
+   CustomPage (메인 export)
 ══════════════════════════════════ */
-export default function Custom() {
-  const fileRef   = useRef(null);
-  const imgRef    = useRef(null);
+export default function CustomPage() {
+  const fileRef  = useRef(null);
+  const imgRef   = useRef(null);
 
-  const [imageUrl,     setImageUrl]     = useState(null);
-  const [naturalSize,  setNaturalSize]  = useState(null);
-  const [pixels,       setPixels]       = useState(null);
-  const [dragging,     setDragging]     = useState(false);
+  const [imageUrl,    setImageUrl]    = useState(null);
+  const [naturalSize, setNaturalSize] = useState(null);
+  const [pixels,      setPixels]      = useState(null);
+  const [dragging,    setDragging]    = useState(false);
 
   const colorCounts = useMemo(
     () => pixels ? countColors(pixels) : [],
@@ -387,7 +381,6 @@ export default function Custom() {
     const url = URL.createObjectURL(file);
     setImageUrl(url);
     setPixels(null);
-
     const img = new Image();
     img.onload = () => {
       setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
@@ -395,8 +388,6 @@ export default function Custom() {
     };
     img.src = url;
   }
-
-  function onFileChange(e) { handleFile(e.target.files[0]); }
 
   function onDrop(e) {
     e.preventDefault();
@@ -417,36 +408,85 @@ export default function Custom() {
       color: T.ink,
     }}>
 
-      {/* 헤더 */}
-      <div style={{ padding: "48px 6vw 0", maxWidth: 1200, margin: "0 auto" }}>
-        <span style={{ fontSize:11, letterSpacing:"0.18em", textTransform:"uppercase", color:T.inkSubtle }}>
-          Customize
-        </span>
-        <h1 style={{
-          fontSize: "clamp(32px, 5vw, 52px)",
-          fontFamily: "'DM Serif Display', Georgia, serif",
-          lineHeight: 1.08, margin: "12px 0 8px", letterSpacing: -0.5,
-        }}>
-          Build your mosaic.
-        </h1>
-        <p style={{ fontSize:14, color:T.inkLight, margin:0, lineHeight:1.7 }}>
-          이미지를 업로드하고 원하는 영역을 크롭하세요.
-          32×32 레고 브릭 모자이크로 변환됩니다.
-        </p>
+      {/* ── 페이지 헤더 ── */}
+      <div style={{
+        padding: "56px 6vw 40px",
+        borderBottom: `1px solid ${T.inkGhost}`,
+        position: "relative",
+        overflow: "hidden",
+      }}>
+        {/* 배경 스터드 패턴 */}
+        <div style={{
+          position:"absolute", inset:0, pointerEvents:"none",
+          backgroundImage:`radial-gradient(circle, ${T.ink} 1.2px, transparent 1.2px)`,
+          backgroundSize:"24px 24px", opacity:0.025,
+        }} />
+
+        <div style={{ position:"relative", maxWidth:1200, margin:"0 auto" }}>
+          {/* 스터드 장식 */}
+          <div style={{ display:"flex", gap:10, marginBottom:20 }}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} style={{
+                width:8, height:8, borderRadius:"50%",
+                background: i < 2 ? T.accent : T.sand,
+                boxShadow:"inset 0 1px 0 rgba(255,255,255,0.4)",
+              }} />
+            ))}
+          </div>
+
+          <span style={{ fontSize:11, letterSpacing:"0.18em", textTransform:"uppercase", color:T.inkSubtle }}>
+            Customize
+          </span>
+          <h1 style={{
+            fontSize: "clamp(36px, 5vw, 60px)",
+            fontFamily: "'DM Serif Display', Georgia, serif",
+            lineHeight: 1.05, margin: "10px 0 12px", letterSpacing: -0.5,
+          }}>
+            Build your mosaic.
+          </h1>
+          <p style={{ fontSize:14, color:T.inkLight, margin:0, lineHeight:1.8, maxWidth:520 }}>
+            이미지를 업로드하고 원하는 영역을 크롭하세요.
+            <br />
+            실제 레고 색상 {LEGO_COLORS.length}가지로 32×32 브릭 모자이크가 완성됩니다.
+          </p>
+        </div>
       </div>
 
-      {/* 본문 */}
+      {/* ── 본문 2열 ── */}
       <div style={{
-        maxWidth: 1200, margin: "40px auto 0",
-        padding: "0 6vw 80px",
+        maxWidth: 1200, margin: "0 auto",
+        padding: "48px 6vw 80px",
         display: "flex",
         gap: "clamp(24px, 4vw, 56px)",
         flexWrap: "wrap",
         alignItems: "flex-start",
       }}>
 
-        {/* ── 왼쪽 ── */}
-        <div style={{ flex: "1 1 360px", minWidth: 0 }}>
+        {/* ── 왼쪽: 업로드 + 크롭 ── */}
+        <div style={{ flex: "1 1 380px", minWidth: 0 }}>
+
+          {/* 라벨 + 새 이미지 버튼 */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+            <span style={{ fontSize:11, letterSpacing:"0.15em", textTransform:"uppercase", color:T.inkSubtle }}>
+              {imageUrl ? "Crop Image" : "Upload Image"}
+            </span>
+            {imageUrl && (
+              <button
+                onClick={() => { setImageUrl(null); setPixels(null); setNaturalSize(null); }}
+                style={{
+                  background:"none", border:`1px solid ${T.sand}`,
+                  borderRadius:8, padding:"5px 14px",
+                  fontSize:11, color:T.inkSubtle, cursor:"pointer",
+                  fontFamily:"'DM Mono', monospace",
+                  transition:"border-color 0.2s, color 0.2s",
+                }}
+                onMouseEnter={e => { e.target.style.borderColor=T.accent; e.target.style.color=T.accent; }}
+                onMouseLeave={e => { e.target.style.borderColor=T.sand;   e.target.style.color=T.inkSubtle; }}
+              >
+                ✕ 새 이미지
+              </button>
+            )}
+          </div>
 
           {!imageUrl ? (
             /* 업로드 존 */
@@ -457,151 +497,199 @@ export default function Custom() {
               onDrop={onDrop}
               style={{
                 border: `2px dashed ${dragging ? T.accent : T.sand}`,
-                borderRadius: 16, padding: "60px 24px",
-                textAlign: "center", cursor: "pointer",
+                borderRadius: 16,
+                padding: "80px 24px",
+                textAlign: "center",
+                cursor: "pointer",
                 background: dragging ? T.creamDark : "transparent",
                 transition: "border-color 0.2s, background 0.2s",
               }}
             >
-              <input ref={fileRef} type="file" accept="image/*" onChange={onFileChange} style={{ display:"none" }} />
-              <div style={{ fontSize:40, marginBottom:16 }}>🖼</div>
-              <div style={{ fontSize:14, color:T.inkLight, marginBottom:8 }}>
-                이미지를 드래그하거나 클릭해서 업로드
-              </div>
-              <div style={{ fontSize:12, color:T.inkSubtle }}>JPG, PNG, WEBP 지원</div>
-            </div>
-          ) : (
-            /* 크롭 UI */
-            <div>
-              <div style={{
-                display: "flex", justifyContent: "space-between",
-                alignItems: "center", marginBottom: 14,
-              }}>
-                <span style={{ fontSize:11, letterSpacing:"0.15em", textTransform:"uppercase", color:T.inkSubtle }}>
-                  Crop Image
-                </span>
-                <button
-                  onClick={() => { setImageUrl(null); setPixels(null); setNaturalSize(null); fileRef.current.value = ""; }}
-                  style={{
-                    background:"none", border:`1px solid ${T.sand}`,
-                    borderRadius:8, padding:"4px 12px",
-                    fontSize:11, color:T.inkSubtle, cursor:"pointer",
-                    fontFamily:"'DM Mono', monospace",
-                  }}
-                >
-                  ✕ 새 이미지
-                </button>
-              </div>
-
-              {naturalSize && (
-                <ImageCropper
-                  imageUrl={imageUrl}
-                  naturalSize={naturalSize}
-                  onApply={handleApply}
-                />
-              )}
-            </div>
-          )}
-
-          {/* 픽셀 결과 */}
-          {pixels && (
-            <div style={{ marginTop: 32 }}>
-              <div style={{ fontSize:11, letterSpacing:"0.15em", textTransform:"uppercase", color:T.inkSubtle, marginBottom:14 }}>
-                32 × 32 Mosaic Preview
-              </div>
-              <div style={{
-                display: "inline-block",
-                background: T.creamDark,
-                padding: 12, borderRadius: 16,
-                border: `1px solid ${T.sand}`,
-                boxShadow: "0 8px 32px rgba(20,18,16,0.08)",
-              }}>
+              <input ref={fileRef} type="file" accept="image/*" onChange={e => handleFile(e.target.files[0])} style={{ display:"none" }} />
+              {/* 레고 블록 아이콘 느낌 */}
+              <div style={{ marginBottom:20 }}>
                 <div style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(32, 1fr)",
-                  gap: "1px",
-                  width: "min(400px, 72vw)",
-                  aspectRatio: "1",
+                  display:"inline-grid",
+                  gridTemplateColumns:"repeat(3, 20px)",
+                  gap:3,
+                  opacity: dragging ? 1 : 0.4,
+                  transition:"opacity 0.2s",
                 }}>
-                  {pixels.map((color, i) => (
+                  {Array.from({ length: 9 }).map((_, i) => (
                     <div key={i} style={{
-                      background: color,
-                      borderRadius: 1,
-                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.15)",
+                      width:20, height:20,
+                      background: [T.accent, T.warm, T.sand][i % 3],
+                      borderRadius:3,
+                      boxShadow:"inset 0 1px 0 rgba(255,255,255,0.3)",
                     }} />
                   ))}
                 </div>
               </div>
-              <div style={{ marginTop:12, fontSize:12, color:T.inkSubtle }}>
-                <span style={{ color:T.accent, fontWeight:500 }}>{colorCounts.length}가지 색상</span> · {pixels.length}개 브릭
+              <div style={{ fontSize:14, color:T.inkLight, marginBottom:8, fontWeight:500 }}>
+                {dragging ? "놓아서 업로드" : "클릭하거나 드래그해서 이미지 업로드"}
+              </div>
+              <div style={{ fontSize:12, color:T.inkSubtle }}>JPG · PNG · WEBP</div>
+            </div>
+          ) : (
+            /* 크롭 UI */
+            naturalSize && (
+              <ImageCropper
+                imageUrl={imageUrl}
+                naturalSize={naturalSize}
+                onApply={handleApply}
+              />
+            )
+          )}
+
+          {/* ── 픽셀 결과 ── */}
+          {pixels && (
+            <div style={{ marginTop:40 }}>
+              <div style={{
+                display:"flex", justifyContent:"space-between", alignItems:"center",
+                marginBottom:14,
+              }}>
+                <span style={{ fontSize:11, letterSpacing:"0.15em", textTransform:"uppercase", color:T.inkSubtle }}>
+                  32 × 32 Preview
+                </span>
+                <span style={{ fontSize:12, color:T.inkSubtle }}>
+                  <span style={{ color:T.accent, fontWeight:500 }}>{colorCounts.length}가지</span> 색상 · 1,024개 브릭
+                </span>
+              </div>
+
+              <div style={{
+                background: T.creamDark,
+                padding: 14, borderRadius: 16,
+                border: `1px solid ${T.sand}`,
+                boxShadow: "0 8px 40px rgba(20,18,16,0.09)",
+                display: "inline-block",
+              }}>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(32, 1fr)",
+                  gap: "1.5px",
+                  width: "min(420px, 70vw)",
+                  aspectRatio: "1",
+                  background: T.sand,
+                  borderRadius: 8,
+                  overflow: "hidden",
+                }}>
+                  {pixels.map((color, i) => (
+                    <div key={i} style={{
+                      background: color,
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.14), inset 0 -1px 0 rgba(0,0,0,0.08)",
+                    }} />
+                  ))}
+                </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* ── 오른쪽: 색상 목록 ── */}
-        <div style={{ flex:"1 1 280px", maxWidth:400 }}>
-          <div style={{ fontSize:11, letterSpacing:"0.15em", textTransform:"uppercase", color:T.inkSubtle, marginBottom:20 }}>
-            {pixels ? `사용된 색상 — ${colorCounts.length}가지` : "색상 팔레트"}
+        {/* ── 오른쪽: 색상 패널 ── */}
+        <div style={{
+          flex: "0 0 320px",
+          background: T.creamDark,
+          border: `1px solid ${T.sand}`,
+          borderRadius: 20,
+          padding: 24,
+          boxShadow: "0 4px 24px rgba(20,18,16,0.06)",
+        }}>
+          <div style={{
+            fontSize:11, letterSpacing:"0.15em", textTransform:"uppercase",
+            color:T.inkSubtle, marginBottom:20,
+            paddingBottom:16, borderBottom:`1px solid ${T.sand}`,
+          }}>
+            {pixels
+              ? `사용된 색상 — ${colorCounts.length}가지`
+              : `레고 팔레트 — ${LEGO_COLORS.length}가지`}
           </div>
 
           {pixels ? (
-            <div style={{ display:"flex", flexDirection:"column", gap:8, maxHeight:"70vh", overflowY:"auto", paddingRight:4 }}>
-              {colorCounts.map(([hex, count]) => (
+            /* 사용된 색상 */
+            <div style={{ display:"flex", flexDirection:"column", gap:6, maxHeight:"60vh", overflowY:"auto", paddingRight:4 }}>
+              {colorCounts.map(([hex, count], idx) => (
                 <div key={hex} style={{
                   display:"flex", alignItems:"center", gap:12,
-                  padding:"10px 14px",
-                  background:T.creamDark,
+                  padding:"10px 12px",
+                  background: T.cream,
                   border:`1px solid ${T.sand}`,
                   borderRadius:10,
+                  opacity: 0,
+                  animation: `fadeUp 0.4s cubic-bezier(.22,1,.36,1) ${idx * 25}ms forwards`,
                 }}>
-                  {/* 스워치 */}
+                  {/* 스터드 스와치 */}
                   <div style={{
-                    width:32, height:32, background:hex, borderRadius:6, flexShrink:0,
-                    boxShadow:"inset 0 2px 0 rgba(255,255,255,0.2), inset 0 -2px 0 rgba(0,0,0,0.15)",
+                    width:32, height:32, background:hex, borderRadius:6,
+                    flexShrink:0,
+                    boxShadow:"inset 0 2px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.14)",
                     position:"relative",
                   }}>
                     <div style={{
                       position:"absolute", top:"50%", left:"50%",
-                      transform:"translate(-50%, -60%)",
-                      width:12, height:12, borderRadius:"50%",
+                      transform:"translate(-50%,-58%)",
+                      width:13, height:13, borderRadius:"50%",
                       background:hex,
-                      boxShadow:"inset 0 1px 0 rgba(255,255,255,0.3), 0 1px 2px rgba(0,0,0,0.2)",
+                      boxShadow:"inset 0 1px 0 rgba(255,255,255,0.35), 0 1.5px 3px rgba(0,0,0,0.2)",
                     }} />
                   </div>
+
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ fontSize:12, fontWeight:500, color:T.ink, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                       {LEGO_COLOR_NAMES[hex] ?? hex}
                     </div>
-                    <div style={{ fontSize:10, color:T.inkSubtle, marginTop:1 }}>{hex.toUpperCase()}</div>
+                    <div style={{ fontSize:10, color:T.inkSubtle, marginTop:1 }}>
+                      {hex.toUpperCase()}
+                    </div>
                   </div>
+
                   <div style={{ textAlign:"right", flexShrink:0 }}>
-                    <div style={{ fontSize:16, fontWeight:300, color:T.accent, lineHeight:1 }}>{count}</div>
-                    <div style={{ fontSize:10, color:T.inkSubtle }}>{((count/1024)*100).toFixed(1)}%</div>
+                    <div style={{ fontSize:17, fontWeight:300, color:T.accent, lineHeight:1, fontFamily:"'DM Mono', monospace" }}>
+                      {count}
+                    </div>
+                    <div style={{ fontSize:10, color:T.inkSubtle }}>
+                      {((count/1024)*100).toFixed(1)}%
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div>
-              <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:16 }}>
+            /* 전체 팔레트 */
+            <>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:20 }}>
                 {LEGO_COLORS.map(hex => (
-                  <div key={hex} title={LEGO_COLOR_NAMES[hex]} style={{
-                    width:28, height:28, background:hex, borderRadius:5,
-                    border:"1px solid rgba(0,0,0,0.08)",
-                    boxShadow:"inset 0 1px 0 rgba(255,255,255,0.2)",
-                  }} />
+                  <div
+                    key={hex}
+                    title={LEGO_COLOR_NAMES[hex]}
+                    style={{
+                      width:26, height:26, background:hex, borderRadius:5,
+                      border:"1px solid rgba(0,0,0,0.07)",
+                      boxShadow:"inset 0 1px 0 rgba(255,255,255,0.2)",
+                      cursor:"default",
+                      transition:"transform 0.15s",
+                    }}
+                    onMouseEnter={e => e.target.style.transform = "scale(1.3)"}
+                    onMouseLeave={e => e.target.style.transform = "scale(1)"}
+                  />
                 ))}
               </div>
-              <div style={{ fontSize:12, color:T.inkSubtle, lineHeight:1.7 }}>
-                총 {LEGO_COLORS.length}가지 실제 레고 색상을 사용합니다.
-                이미지를 업로드하면 각 색상의 사용 개수가 표시됩니다.
+              <div style={{ fontSize:12, color:T.inkSubtle, lineHeight:1.8 }}>
+                이미지를 업로드하면 각 색상이
+                <br />몇 개의 브릭으로 사용되는지 확인할 수 있어요.
               </div>
-            </div>
+            </>
           )}
         </div>
 
       </div>
+
+      {/* 애니메이션 */}
+      <style>{`
+        @keyframes fadeUp {
+          from { opacity:0; transform:translateY(10px); }
+          to   { opacity:1; transform:translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }

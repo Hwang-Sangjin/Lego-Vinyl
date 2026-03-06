@@ -3,7 +3,7 @@ import CustomPage from "../pages/CustomPage";
 
 const Custom = () => {
   return (
-    <section className="min-h-screen p-8">
+    <section >
       <CustomPage/>
     </section>
   );
