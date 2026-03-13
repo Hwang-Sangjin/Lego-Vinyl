@@ -124,9 +124,6 @@ const LEGO_COLOR_NAMES = {
   "#CDA4DE": "Lavender",
 };
 
-/* ══════════════════════════════════
-   색상 유틸
-══════════════════════════════════ */
 function hexToRgb(hex) {
   const h = hex.replace("#", "");
   return {
