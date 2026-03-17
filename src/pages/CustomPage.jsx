@@ -203,233 +203,169 @@ function countColors(pixels) {
 }
 
 /* ══════════════════════════════════
-   ColorPickerPopup
-   원본 색 → 새 색 선택 팝업
-   - 레고 팔레트 50색
-   - 자유 hex 입력
+   HalftoneGrid
+   셀 클릭 → onCellClick(row, col, domRect) 콜백
+   cellOverrides: { "row,col": hex }
 ══════════════════════════════════ */
-function ColorPickerPopup({ fromHex, onSelect, onClose }) {
-  const overlayRef = useRef(null);
-
-  // 팝업 바깥 클릭 → 닫기
-  useEffect(() => {
-    const handler = (e) => {
-      if (overlayRef.current && e.target === overlayRef.current) onClose();
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
-
-  // ESC 닫기
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+function HalftoneGrid({ pixels, cellOverrides, onCellClick }) {
+  const GRID = 32;
 
   return (
     <div
-      ref={overlayRef}
       style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(20,18,16,0.45)",
-        zIndex: 1000,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
+        display: "grid",
+        gridTemplateColumns: `repeat(${GRID}, 1fr)`,
+        gap: 1.5,
+        background: T.creamDark,
+        padding: 6,
+        borderRadius: 8,
+        width: "min(448px, 70vw)",
+        aspectRatio: "1",
+        boxSizing: "border-box",
+        cursor: "crosshair",
+        userSelect: "none",
       }}
     >
-      <div
-        style={{
-          background: T.cream,
-          borderRadius: 20,
-          padding: 28,
-          width: "min(400px, 90vw)",
-          boxShadow: "0 24px 80px rgba(20,18,16,0.28)",
-          border: `1px solid ${T.sand}`,
-          position: "relative",
-        }}
-      >
-        {/* 닫기 버튼 */}
-        <button
-          onClick={onClose}
-          style={{
-            position: "absolute",
-            top: 16,
-            right: 16,
-            background: "none",
-            border: "none",
-            cursor: "pointer",
-            fontSize: 18,
-            color: T.inkSubtle,
-            lineHeight: 1,
-            padding: 4,
-          }}
-        >
-          ✕
-        </button>
+      {pixels.map(({ color }, i) => {
+        const row = Math.floor(i / GRID);
+        const col = i % GRID;
+        const key = `${row},${col}`;
+        const displayColor = cellOverrides[key] || color;
 
-        {/* 헤더: 현재 색상 표시 */}
-        <div style={{ marginBottom: 20 }}>
+        return (
           <div
-            style={{
-              fontSize: 11,
-              letterSpacing: "0.15em",
-              textTransform: "uppercase",
-              color: T.inkSubtle,
-              marginBottom: 12,
+            key={i}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCellClick(row, col, e.currentTarget.getBoundingClientRect());
             }}
-          >
-            색상 변경
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                background: fromHex,
-                borderRadius: 8,
-                boxShadow:
-                  "inset 0 2px 0 rgba(255,255,255,0.2), inset 0 -2px 0 rgba(0,0,0,0.12)",
-                flexShrink: 0,
-              }}
-            />
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: T.ink }}>
-                {LEGO_COLOR_NAMES[fromHex] ?? fromHex}
-              </div>
-              <div style={{ fontSize: 11, color: T.inkSubtle, marginTop: 2 }}>
-                {fromHex.toUpperCase()} · 교체할 색상을 선택하세요
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 레고 팔레트 */}
-        <div
-          style={{
-            fontSize: 11,
-            letterSpacing: "0.12em",
-            textTransform: "uppercase",
-            color: T.inkSubtle,
-            marginBottom: 12,
-          }}
-        >
-          레고 팔레트 — {LEGO_COLORS.length}색
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {LEGO_COLORS.map((hex) => (
-            <div
-              key={hex}
-              title={LEGO_COLOR_NAMES[hex]}
-              onClick={() => onSelect(hex)}
-              style={{
-                width: 30,
-                height: 30,
-                background: hex,
-                borderRadius: 6,
-                border:
-                  hex === fromHex
-                    ? `2.5px solid ${T.accent}`
-                    : `1px solid rgba(0,0,0,0.08)`,
-                cursor: "pointer",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.2)",
-                transition: "transform 0.12s, box-shadow 0.12s",
-                flexShrink: 0,
-                position: "relative",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "scale(1.28)";
-                e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.25)";
-                e.currentTarget.style.zIndex = "1";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "scale(1)";
-                e.currentTarget.style.boxShadow =
-                  "inset 0 1px 0 rgba(255,255,255,0.2)";
-                e.currentTarget.style.zIndex = "0";
-              }}
-            />
-          ))}
-        </div>
-      </div>
+            style={{
+              background: displayColor,
+              borderRadius: 2,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.outline = `1.5px solid ${T.accent}`;
+              e.currentTarget.style.zIndex = "1";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.outline = "none";
+              e.currentTarget.style.zIndex = "0";
+            }}
+          />
+        );
+      })}
     </div>
   );
 }
 
 /* ══════════════════════════════════
-   HalftoneGrid
-   모든 셀을 동일한 크기의 rect로 렌더링
-   luma는 색상 매핑에만 사용, 크기에는 영향 없음
+   CellPalette
+   클릭된 셀 위치 근처에 뜨는 팔레트 팝오버
 ══════════════════════════════════ */
-function HalftoneGrid({ pixels, colorMap }) {
-  const canvasRef = useRef(null);
-  const GRID = 32;
-  const CELL = 14;
-  const SIZE = GRID * CELL; // 448px
+function CellPalette({ anchorRect, currentColor, onSelect, onClose }) {
+  const ref = useRef(null);
+  const POPOVER_W = 212;
+  const POPOVER_H = 180; // 어림값, 실제는 콘텐츠에 따라 다름
 
-  // rect 크기: 셀의 85%, 셀 내 중앙 정렬
-  const RECT_SIZE = Math.round(CELL * 0.85);
-  const RECT_OFFSET = (CELL - RECT_SIZE) / 2;
-  // 둥근 모서리 반경
-  const RADIUS = 2;
+  // 뷰포트 기준 위치 계산 — 셀 아래 or 위
+  const spaceBelow = window.innerHeight - anchorRect.bottom;
+  const top =
+    spaceBelow > POPOVER_H + 8
+      ? anchorRect.bottom + 6
+      : anchorRect.top - POPOVER_H - 6;
+  const left = Math.min(
+    Math.max(anchorRect.left - POPOVER_W / 2 + anchorRect.width / 2, 8),
+    window.innerWidth - POPOVER_W - 8,
+  );
 
+  // 바깥 클릭 / ESC 닫기
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !pixels.length) return;
-    const ctx = canvas.getContext("2d");
-
-    // 배경
-    ctx.fillStyle = T.creamDark;
-    ctx.fillRect(0, 0, SIZE, SIZE);
-
-    for (let row = 0; row < GRID; row++) {
-      for (let col = 0; col < GRID; col++) {
-        const { color: originalColor } = pixels[row * GRID + col];
-        // colorMap에 교체 색이 있으면 사용, 없으면 원본
-        const color = (colorMap && colorMap[originalColor]) || originalColor;
-
-        const x = col * CELL + RECT_OFFSET;
-        const y = row * CELL + RECT_OFFSET;
-        const w = RECT_SIZE;
-        const h = RECT_SIZE;
-        const r = RADIUS;
-
-        // 둥근 모서리 rect (roundRect)
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + w - r, y);
-        ctx.arcTo(x + w, y, x + w, y + r, r);
-        ctx.lineTo(x + w, y + h - r);
-        ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
-        ctx.lineTo(x + r, y + h);
-        ctx.arcTo(x, y + h, x, y + h - r, r);
-        ctx.lineTo(x, y + r);
-        ctx.arcTo(x, y, x + r, y, r);
-        ctx.closePath();
-
-        ctx.fillStyle = color;
-        ctx.fill();
-      }
-    }
-  }, [pixels, colorMap]);
+    const onDown = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={SIZE}
-      height={SIZE}
+    <div
+      ref={ref}
       style={{
-        width: "min(448px, 70vw)",
-        height: "min(448px, 70vw)",
-        borderRadius: 8,
-        display: "block",
+        position: "fixed",
+        top,
+        left,
+        width: POPOVER_W,
+        background: T.cream,
+        border: `1px solid ${T.sand}`,
+        borderRadius: 14,
+        padding: 12,
+        boxShadow: "0 10px 36px rgba(20,18,16,0.2)",
+        zIndex: 500,
       }}
-    />
+    >
+      {/* 현재 색 표시 */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        <div
+          style={{
+            width: 20,
+            height: 20,
+            background: currentColor,
+            borderRadius: 4,
+            border: "1px solid rgba(0,0,0,0.1)",
+            flexShrink: 0,
+          }}
+        />
+        <span
+          style={{ fontSize: 10, color: T.inkSubtle, letterSpacing: "0.08em" }}
+        >
+          {LEGO_COLOR_NAMES[currentColor] ?? currentColor}
+        </span>
+      </div>
+      {/* 팔레트 */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {LEGO_COLORS.map((hex) => (
+          <div
+            key={hex}
+            title={LEGO_COLOR_NAMES[hex]}
+            onClick={() => {
+              onSelect(hex);
+              onClose();
+            }}
+            style={{
+              width: 24,
+              height: 24,
+              background: hex,
+              borderRadius: 5,
+              border:
+                hex === currentColor
+                  ? `2px solid ${T.accent}`
+                  : "1px solid rgba(0,0,0,0.07)",
+              cursor: "pointer",
+              transition: "transform 0.1s",
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.transform = "scale(1.28)")
+            }
+            onMouseLeave={(e) => (e.currentTarget.style.transform = "scale(1)")}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -964,20 +900,24 @@ export default function CustomPage() {
   const [imageUrl, setImageUrl] = useState(null);
   const [naturalSize, setNaturalSize] = useState(null);
   const [pixels, setPixels] = useState(null);
-  // { 원본hex: 교체hex } — 색상 교체 매핑
-  const [colorMap, setColorMap] = useState({});
-  // 팝업: 현재 편집 중인 원본 hex
-  const [editingHex, setEditingHex] = useState(null);
+  // 셀별 개별 색상 오버라이드: { "row,col": hex }
+  const [cellOverrides, setCellOverrides] = useState({});
+  // 팝오버: { row, col, rect } | null
+  const [popover, setPopover] = useState(null);
 
   const colorCounts = useMemo(
     () => (pixels ? countColors(pixels) : []),
     [pixels],
   );
 
-  // 색상 교체 적용
-  function handleColorSelect(newHex) {
-    setColorMap((prev) => ({ ...prev, [editingHex]: newHex }));
-    setEditingHex(null);
+  function handleCellClick(row, col, rect) {
+    setPopover({ row, col, rect });
+  }
+
+  function handlePaletteSelect(hex) {
+    const key = `${popover.row},${popover.col}`;
+    setCellOverrides((prev) => ({ ...prev, [key]: hex }));
+    setPopover(null);
   }
 
   function handleFile(file) {
@@ -996,8 +936,8 @@ export default function CustomPage() {
     setImageUrl(null);
     setNaturalSize(null);
     setPixels(null);
-    setColorMap({});
-    setEditingHex(null);
+    setCellOverrides({});
+    setPopover(null);
     imgRef.current = null;
   }
 
@@ -1201,26 +1141,75 @@ export default function CustomPage() {
                   >
                     32 × 32 Pixel Preview
                   </span>
-                  <span style={{ fontSize: 12, color: T.inkSubtle }}>
-                    <span style={{ color: T.accent, fontWeight: 500 }}>
-                      {colorCounts.length}가지
-                    </span>{" "}
-                    색상 · 1,024개 브릭
-                  </span>
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 10 }}
+                  >
+                    <span style={{ fontSize: 12, color: T.inkSubtle }}>
+                      <span style={{ color: T.accent, fontWeight: 500 }}>
+                        {colorCounts.length}가지
+                      </span>{" "}
+                      색상 · 1,024개 브릭
+                    </span>
+                    {Object.keys(cellOverrides).length > 0 && (
+                      <button
+                        onClick={() => setCellOverrides({})}
+                        style={{
+                          background: "none",
+                          border: `1px solid ${T.sand}`,
+                          borderRadius: 7,
+                          padding: "3px 10px",
+                          fontSize: 10,
+                          color: T.inkSubtle,
+                          cursor: "pointer",
+                          fontFamily: "'DM Mono', monospace",
+                          transition: "border-color 0.15s, color 0.15s",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = T.accent;
+                          e.currentTarget.style.color = T.accent;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = T.sand;
+                          e.currentTarget.style.color = T.inkSubtle;
+                        }}
+                      >
+                        초기화
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div
-                  style={{
-                    background: T.creamDark,
-                    padding: 14,
-                    borderRadius: 16,
-                    border: `1px solid ${T.sand}`,
-                    boxShadow: "0 8px 40px rgba(20,18,16,0.09)",
-                    display: "inline-block",
-                  }}
+                  style={{ fontSize: 11, color: T.inkSubtle, marginBottom: 10 }}
                 >
-                  <HalftoneGrid pixels={pixels} colorMap={colorMap} />
+                  셀을 클릭해 색상을 변경하세요
                 </div>
+
+                <div style={{ display: "inline-block" }}>
+                  <HalftoneGrid
+                    pixels={pixels}
+                    cellOverrides={cellOverrides}
+                    onCellClick={handleCellClick}
+                  />
+                </div>
+
+                {/* 셀 팝오버 */}
+                {popover &&
+                  pixels &&
+                  (() => {
+                    const key = `${popover.row},${popover.col}`;
+                    const originalColor =
+                      pixels[popover.row * 32 + popover.col].color;
+                    const currentColor = cellOverrides[key] || originalColor;
+                    return (
+                      <CellPalette
+                        anchorRect={popover.rect}
+                        currentColor={currentColor}
+                        onSelect={handlePaletteSelect}
+                        onClose={() => setPopover(null)}
+                      />
+                    );
+                  })()}
               </div>
             </div>
           )}
@@ -1255,33 +1244,6 @@ export default function CustomPage() {
                 ? `사용된 색상 — ${colorCounts.length}가지`
                 : `레고 팔레트 — ${LEGO_COLORS.length}가지`}
             </span>
-            {pixels && Object.keys(colorMap).length > 0 && (
-              <button
-                onClick={() => setColorMap({})}
-                style={{
-                  background: "none",
-                  border: `1px solid ${T.sand}`,
-                  borderRadius: 6,
-                  padding: "3px 10px",
-                  fontSize: 10,
-                  color: T.inkSubtle,
-                  cursor: "pointer",
-                  fontFamily: "'DM Mono', monospace",
-                  transition: "border-color 0.15s, color 0.15s",
-                  letterSpacing: "0.05em",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = T.accent;
-                  e.currentTarget.style.color = T.accent;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = T.sand;
-                  e.currentTarget.style.color = T.inkSubtle;
-                }}
-              >
-                초기화
-              </button>
-            )}
           </div>
 
           {pixels ? (
@@ -1295,148 +1257,86 @@ export default function CustomPage() {
                 paddingRight: 4,
               }}
             >
-              {colorCounts.map(([hex, count], idx) => {
-                const mappedHex = colorMap[hex] || hex;
-                const isEdited = !!colorMap[hex];
-                return (
+              {colorCounts.map(([hex, count], idx) => (
+                <div
+                  key={hex}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "10px 12px",
+                    background: T.cream,
+                    border: `1px solid ${T.sand}`,
+                    borderRadius: 10,
+                    opacity: 0,
+                    animation: `fadeUp 0.4s cubic-bezier(.22,1,.36,1) ${idx * 25}ms forwards`,
+                  }}
+                >
+                  {/* 스워치 */}
                   <div
-                    key={hex}
-                    onClick={() => setEditingHex(hex)}
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                      padding: "10px 12px",
-                      background: T.cream,
-                      border: `1px solid ${isEdited ? T.accent : T.sand}`,
-                      borderRadius: 10,
-                      opacity: 0,
-                      animation: `fadeUp 0.4s cubic-bezier(.22,1,.36,1) ${idx * 25}ms forwards`,
-                      cursor: "pointer",
-                      transition: "border-color 0.15s, box-shadow 0.15s",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.boxShadow =
-                        "0 2px 12px rgba(20,18,16,0.1)";
-                      e.currentTarget.style.borderColor = T.accent;
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.boxShadow = "none";
-                      e.currentTarget.style.borderColor = isEdited
-                        ? T.accent
-                        : T.sand;
+                      width: 32,
+                      height: 32,
+                      background: hex,
+                      borderRadius: 6,
+                      flexShrink: 0,
+                      boxShadow:
+                        "inset 0 2px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.14)",
+                      position: "relative",
                     }}
                   >
-                    {/* 스워치: 원본 → 교체 표시 */}
-                    <div style={{ position: "relative", flexShrink: 0 }}>
-                      <div
-                        style={{
-                          width: 32,
-                          height: 32,
-                          background: mappedHex,
-                          borderRadius: 6,
-                          boxShadow:
-                            "inset 0 2px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.14)",
-                          position: "relative",
-                        }}
-                      >
-                        <div
-                          style={{
-                            position: "absolute",
-                            top: "50%",
-                            left: "50%",
-                            transform: "translate(-50%,-58%)",
-                            width: 13,
-                            height: 13,
-                            borderRadius: "50%",
-                            background: mappedHex,
-                            boxShadow:
-                              "inset 0 1px 0 rgba(255,255,255,0.35), 0 1.5px 3px rgba(0,0,0,0.2)",
-                          }}
-                        />
-                      </div>
-                      {/* 원본 색 뱃지 (교체된 경우만 표시) */}
-                      {isEdited && (
-                        <div
-                          style={{
-                            position: "absolute",
-                            bottom: -4,
-                            right: -4,
-                            width: 14,
-                            height: 14,
-                            background: hex,
-                            borderRadius: 3,
-                            border: `1.5px solid ${T.cream}`,
-                          }}
-                        />
-                      )}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 500,
-                          color: T.ink,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {isEdited
-                          ? (LEGO_COLOR_NAMES[mappedHex] ?? mappedHex)
-                          : (LEGO_COLOR_NAMES[hex] ?? hex)}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: isEdited ? T.accent : T.inkSubtle,
-                          marginTop: 1,
-                        }}
-                      >
-                        {isEdited
-                          ? `${hex.toUpperCase()} → ${mappedHex.toUpperCase()}`
-                          : hex.toUpperCase()}
-                      </div>
-                    </div>
                     <div
                       style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "flex-end",
-                        gap: 4,
-                        flexShrink: 0,
+                        position: "absolute",
+                        top: "50%",
+                        left: "50%",
+                        transform: "translate(-50%,-58%)",
+                        width: 13,
+                        height: 13,
+                        borderRadius: "50%",
+                        background: hex,
+                        boxShadow:
+                          "inset 0 1px 0 rgba(255,255,255,0.35), 0 1.5px 3px rgba(0,0,0,0.2)",
+                      }}
+                    />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 500,
+                        color: T.ink,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
                       }}
                     >
-                      <div style={{ textAlign: "right" }}>
-                        <div
-                          style={{
-                            fontSize: 17,
-                            fontWeight: 300,
-                            color: T.accent,
-                            lineHeight: 1,
-                            fontFamily: "'DM Mono', monospace",
-                          }}
-                        >
-                          {count}
-                        </div>
-                        <div style={{ fontSize: 10, color: T.inkSubtle }}>
-                          {((count / 1024) * 100).toFixed(1)}%
-                        </div>
-                      </div>
-                      {/* 편집 아이콘 */}
-                      <div
-                        style={{
-                          fontSize: 10,
-                          color: T.inkSubtle,
-                          letterSpacing: "0.05em",
-                        }}
-                      >
-                        ✎ 편집
-                      </div>
+                      {LEGO_COLOR_NAMES[hex] ?? hex}
+                    </div>
+                    <div
+                      style={{ fontSize: 10, color: T.inkSubtle, marginTop: 1 }}
+                    >
+                      {hex.toUpperCase()}
                     </div>
                   </div>
-                );
-              })}
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 17,
+                        fontWeight: 300,
+                        color: T.accent,
+                        lineHeight: 1,
+                        fontFamily: "'DM Mono', monospace",
+                      }}
+                    >
+                      {count}
+                    </div>
+                    <div style={{ fontSize: 10, color: T.inkSubtle }}>
+                      {((count / 1024) * 100).toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <>
@@ -1488,15 +1388,6 @@ export default function CustomPage() {
           to   { opacity:1; transform:translateY(0); }
         }
       `}</style>
-
-      {/* 색상 편집 팝업 */}
-      {editingHex && (
-        <ColorPickerPopup
-          fromHex={editingHex}
-          onSelect={handleColorSelect}
-          onClose={() => setEditingHex(null)}
-        />
-      )}
     </div>
   );
 }
