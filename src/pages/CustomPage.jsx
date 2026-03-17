@@ -133,7 +133,6 @@ function hexToRgb(hex) {
   };
 }
 
-/* CIE Lab 색공간 거리 — 보라/라벤더 계열 정확히 매핑 */
 function rgbToLab(r, g, b) {
   const lin = (c) => {
     c /= 255;
@@ -169,18 +168,8 @@ function nearestLegoColor(r, g, b) {
   return nearest;
 }
 
-/* ══════════════════════════════════
-   핵심: 이미지 → 32×32 halftone 데이터
-   GLSL 로직을 Canvas 2D로 구현:
-     - floor(uv / pixelSize)  → 32×32 다운샘플
-     - fract(uv / pixelSize)  → 셀 내 좌표 (dot 위치)
-     - smoothstep(radius,dist)→ dot 경계 antialiasing
-     - luma 기반 radius       → 밝기에 따른 dot 크기
-══════════════════════════════════ */
 function halftoneFromCrop(imgEl, cropPx) {
   const SIZE = 32;
-
-  // floor(uv / pixelSize) — 크롭 영역을 32×32로 다운샘플
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = SIZE;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -197,18 +186,12 @@ function halftoneFromCrop(imgEl, cropPx) {
   );
   const { data } = ctx.getImageData(0, 0, SIZE, SIZE);
 
-  // 각 셀에서 color(레고 팔레트) + luma(dot 크기 결정) 추출
   return Array.from({ length: SIZE * SIZE }, (_, i) => {
     const r = data[i * 4],
       g = data[i * 4 + 1],
       b = data[i * 4 + 2];
-
-    // GLSL: float luma = dot(vec3(0.2126, 0.7152, 0.0722), color.rgb)
     const luma = 0.2126 * (r / 255) + 0.7152 * (g / 255) + 0.0722 * (b / 255);
-
-    // CIE Lab 기반 레고 색상 매핑
     const color = nearestLegoColor(r, g, b);
-
     return { color, luma };
   });
 }
@@ -220,66 +203,220 @@ function countColors(pixels) {
 }
 
 /* ══════════════════════════════════
-   HalftoneGrid
-   GLSL halftone 로직을 Canvas 2D로 직접 구현
+   ColorPickerPopup
+   원본 색 → 새 색 선택 팝업
+   - 레고 팔레트 50색
+   - 자유 hex 입력
 ══════════════════════════════════ */
-function HalftoneGrid({ pixels }) {
+function ColorPickerPopup({ fromHex, onSelect, onClose }) {
+  const overlayRef = useRef(null);
+
+  // 팝업 바깥 클릭 → 닫기
+  useEffect(() => {
+    const handler = (e) => {
+      if (overlayRef.current && e.target === overlayRef.current) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  // ESC 닫기
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={overlayRef}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(20,18,16,0.45)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        style={{
+          background: T.cream,
+          borderRadius: 20,
+          padding: 28,
+          width: "min(400px, 90vw)",
+          boxShadow: "0 24px 80px rgba(20,18,16,0.28)",
+          border: `1px solid ${T.sand}`,
+          position: "relative",
+        }}
+      >
+        {/* 닫기 버튼 */}
+        <button
+          onClick={onClose}
+          style={{
+            position: "absolute",
+            top: 16,
+            right: 16,
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            fontSize: 18,
+            color: T.inkSubtle,
+            lineHeight: 1,
+            padding: 4,
+          }}
+        >
+          ✕
+        </button>
+
+        {/* 헤더: 현재 색상 표시 */}
+        <div style={{ marginBottom: 20 }}>
+          <div
+            style={{
+              fontSize: 11,
+              letterSpacing: "0.15em",
+              textTransform: "uppercase",
+              color: T.inkSubtle,
+              marginBottom: 12,
+            }}
+          >
+            색상 변경
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                background: fromHex,
+                borderRadius: 8,
+                boxShadow:
+                  "inset 0 2px 0 rgba(255,255,255,0.2), inset 0 -2px 0 rgba(0,0,0,0.12)",
+                flexShrink: 0,
+              }}
+            />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: T.ink }}>
+                {LEGO_COLOR_NAMES[fromHex] ?? fromHex}
+              </div>
+              <div style={{ fontSize: 11, color: T.inkSubtle, marginTop: 2 }}>
+                {fromHex.toUpperCase()} · 교체할 색상을 선택하세요
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 레고 팔레트 */}
+        <div
+          style={{
+            fontSize: 11,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: T.inkSubtle,
+            marginBottom: 12,
+          }}
+        >
+          레고 팔레트 — {LEGO_COLORS.length}색
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {LEGO_COLORS.map((hex) => (
+            <div
+              key={hex}
+              title={LEGO_COLOR_NAMES[hex]}
+              onClick={() => onSelect(hex)}
+              style={{
+                width: 30,
+                height: 30,
+                background: hex,
+                borderRadius: 6,
+                border:
+                  hex === fromHex
+                    ? `2.5px solid ${T.accent}`
+                    : `1px solid rgba(0,0,0,0.08)`,
+                cursor: "pointer",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.2)",
+                transition: "transform 0.12s, box-shadow 0.12s",
+                flexShrink: 0,
+                position: "relative",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "scale(1.28)";
+                e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.25)";
+                e.currentTarget.style.zIndex = "1";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "scale(1)";
+                e.currentTarget.style.boxShadow =
+                  "inset 0 1px 0 rgba(255,255,255,0.2)";
+                e.currentTarget.style.zIndex = "0";
+              }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════
+   HalftoneGrid
+   모든 셀을 동일한 크기의 rect로 렌더링
+   luma는 색상 매핑에만 사용, 크기에는 영향 없음
+══════════════════════════════════ */
+function HalftoneGrid({ pixels, colorMap }) {
   const canvasRef = useRef(null);
   const GRID = 32;
-  const CELL = 14; // 셀 하나 = 14px
-  const SIZE = GRID * CELL; // 전체 = 448px
+  const CELL = 14;
+  const SIZE = GRID * CELL; // 448px
+
+  // rect 크기: 셀의 85%, 셀 내 중앙 정렬
+  const RECT_SIZE = Math.round(CELL * 0.85);
+  const RECT_OFFSET = (CELL - RECT_SIZE) / 2;
+  // 둥근 모서리 반경
+  const RADIUS = 2;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !pixels.length) return;
     const ctx = canvas.getContext("2d");
 
-    // 배경 (크림)
+    // 배경
     ctx.fillStyle = T.creamDark;
     ctx.fillRect(0, 0, SIZE, SIZE);
 
     for (let row = 0; row < GRID; row++) {
       for (let col = 0; col < GRID; col++) {
-        const { color, luma } = pixels[row * GRID + col];
+        const { color: originalColor } = pixels[row * GRID + col];
+        // colorMap에 교체 색이 있으면 사용, 없으면 원본
+        const color = (colorMap && colorMap[originalColor]) || originalColor;
 
-        // GLSL: vec2 cellUv = fract(uv / normalizedPixelSize)
-        // 각 셀의 중심 좌표 = (col + 0.5) * CELL
-        const cx = col * CELL + CELL / 2;
-        const cy = row * CELL + CELL / 2;
+        const x = col * CELL + RECT_OFFSET;
+        const y = row * CELL + RECT_OFFSET;
+        const w = RECT_SIZE;
+        const h = RECT_SIZE;
+        const r = RADIUS;
 
-        // GLSL: float radius = uRadius * (0.1 + luma)
-        // 어두울수록 dot 크게 (역전): radius ∝ (1 - luma)
-        const maxR = CELL * 0.5 * 0.9;
-        const dotR = maxR * Math.sqrt(1 - luma); // sqrt → 면적 기반, 시각적으로 균등
-
-        if (dotR < 0.4) continue;
-
-        // GLSL: float circle = smoothstep(radius-0.01, radius+0.01, dist)
-        // → Canvas에서 radialGradient로 smoothstep 경계 재현
+        // 둥근 모서리 rect (roundRect)
         ctx.beginPath();
-        ctx.arc(cx, cy, dotR, 0, Math.PI * 2);
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.arcTo(x + w, y, x + w, y + r, r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+        ctx.lineTo(x + r, y + h);
+        ctx.arcTo(x, y + h, x, y + h - r, r);
+        ctx.lineTo(x, y + r);
+        ctx.arcTo(x, y, x + r, y, r);
+        ctx.closePath();
+
         ctx.fillStyle = color;
-        ctx.fill();
-
-        // smoothstep antialiasing — 경계 0.01 범위를 1px 페이드로 표현
-        const edgePx = 0.8;
-        const grad = ctx.createRadialGradient(
-          cx,
-          cy,
-          Math.max(0, dotR - edgePx),
-          cx,
-          cy,
-          dotR + edgePx,
-        );
-        grad.addColorStop(0, "rgba(0,0,0,0)");
-        grad.addColorStop(1, "rgba(0,0,0,0.12)");
-        ctx.beginPath();
-        ctx.arc(cx, cy, dotR + edgePx, 0, Math.PI * 2);
-        ctx.fillStyle = grad;
         ctx.fill();
       }
     }
-  }, [pixels]);
+  }, [pixels, colorMap]);
 
   return (
     <canvas
@@ -362,7 +499,6 @@ function UploadZone({ onFile }) {
         style={{ display: "none" }}
       />
 
-      {/* 레고 블록 3×3 */}
       <div style={{ marginBottom: 20 }}>
         <div
           style={{
@@ -619,7 +755,6 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
 
         {crop && (
           <>
-            {/* 어두운 오버레이 4방향 */}
             <div
               style={{
                 position: "absolute",
@@ -665,7 +800,6 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
               }}
             />
 
-            {/* 크롭 박스 */}
             <div
               style={{
                 position: "absolute",
@@ -678,7 +812,6 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
                 pointerEvents: "none",
               }}
             >
-              {/* 룰 오브 서드 */}
               {[1 / 3, 2 / 3].map((r) => (
                 <React.Fragment key={r}>
                   <div
@@ -705,7 +838,6 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
                   />
                 </React.Fragment>
               ))}
-              {/* L자 모서리 */}
               {[
                 {
                   top: 0,
@@ -745,7 +877,6 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
               ))}
             </div>
 
-            {/* 리사이즈 핸들 */}
             {handles.map(({ dir, cx, cy }) => (
               <div
                 key={dir}
@@ -779,7 +910,6 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
         )}
       </div>
 
-      {/* 크기 표시 */}
       {crop && (
         <div
           style={{
@@ -793,7 +923,6 @@ function ImageCropper({ imageUrl, naturalSize, onApply }) {
         </div>
       )}
 
-      {/* Apply 버튼 */}
       <button
         onClick={() => crop && onApply(toNaturalCrop(crop))}
         disabled={!crop}
@@ -834,12 +963,22 @@ export default function CustomPage() {
 
   const [imageUrl, setImageUrl] = useState(null);
   const [naturalSize, setNaturalSize] = useState(null);
-  const [pixels, setPixels] = useState(null); // { color, luma }[]
+  const [pixels, setPixels] = useState(null);
+  // { 원본hex: 교체hex } — 색상 교체 매핑
+  const [colorMap, setColorMap] = useState({});
+  // 팝업: 현재 편집 중인 원본 hex
+  const [editingHex, setEditingHex] = useState(null);
 
   const colorCounts = useMemo(
     () => (pixels ? countColors(pixels) : []),
     [pixels],
   );
+
+  // 색상 교체 적용
+  function handleColorSelect(newHex) {
+    setColorMap((prev) => ({ ...prev, [editingHex]: newHex }));
+    setEditingHex(null);
+  }
 
   function handleFile(file) {
     const url = URL.createObjectURL(file);
@@ -857,6 +996,8 @@ export default function CustomPage() {
     setImageUrl(null);
     setNaturalSize(null);
     setPixels(null);
+    setColorMap({});
+    setEditingHex(null);
     imgRef.current = null;
   }
 
@@ -874,7 +1015,6 @@ export default function CustomPage() {
         color: T.ink,
       }}
     >
-      {/* ── 페이지 헤더 ── */}
       <div
         style={{
           padding: "56px 6vw 40px",
@@ -940,13 +1080,12 @@ export default function CustomPage() {
           >
             이미지를 업로드하고 원하는 영역을 크롭하세요.
             <br />
-            실제 레고 색상 {LEGO_COLORS.length}가지로 32×32 Halftone 모자이크가
+            실제 레고 색상 {LEGO_COLORS.length}가지로 32×32 픽셀 모자이크가
             완성됩니다.
           </p>
         </div>
       </div>
 
-      {/* ── 본문 2열 ── */}
       <div
         style={{
           maxWidth: 1200,
@@ -958,9 +1097,7 @@ export default function CustomPage() {
           alignItems: "flex-start",
         }}
       >
-        {/* ── 왼쪽 ── */}
         <div style={{ flex: "1 1 380px", minWidth: 0 }}>
-          {/* 라벨 + 새 이미지 버튼 */}
           <div
             style={{
               display: "flex",
@@ -1007,10 +1144,8 @@ export default function CustomPage() {
             )}
           </div>
 
-          {/* 업로드 존 */}
           {!imageUrl && <UploadZone onFile={handleFile} />}
 
-          {/* 크롭 UI */}
           {imageUrl && !pixels && naturalSize && (
             <ImageCropper
               imageUrl={imageUrl}
@@ -1019,7 +1154,6 @@ export default function CustomPage() {
             />
           )}
 
-          {/* 크롭 후 다시 조정 버튼 */}
           {pixels && imageUrl && naturalSize && (
             <div style={{ marginBottom: 24 }}>
               <button
@@ -1048,7 +1182,6 @@ export default function CustomPage() {
                 ← 크롭 재조정
               </button>
 
-              {/* ── Halftone 결과 ── */}
               <div>
                 <div
                   style={{
@@ -1066,7 +1199,7 @@ export default function CustomPage() {
                       color: T.inkSubtle,
                     }}
                   >
-                    32 × 32 Halftone Preview
+                    32 × 32 Pixel Preview
                   </span>
                   <span style={{ fontSize: 12, color: T.inkSubtle }}>
                     <span style={{ color: T.accent, fontWeight: 500 }}>
@@ -1086,14 +1219,13 @@ export default function CustomPage() {
                     display: "inline-block",
                   }}
                 >
-                  <HalftoneGrid pixels={pixels} />
+                  <HalftoneGrid pixels={pixels} colorMap={colorMap} />
                 </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* ── 오른쪽: 색상 패널 ── */}
         <div
           style={{
             flex: "0 0 320px",
@@ -1113,15 +1245,46 @@ export default function CustomPage() {
               marginBottom: 20,
               paddingBottom: 16,
               borderBottom: `1px solid ${T.sand}`,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
             }}
           >
-            {pixels
-              ? `사용된 색상 — ${colorCounts.length}가지`
-              : `레고 팔레트 — ${LEGO_COLORS.length}가지`}
+            <span>
+              {pixels
+                ? `사용된 색상 — ${colorCounts.length}가지`
+                : `레고 팔레트 — ${LEGO_COLORS.length}가지`}
+            </span>
+            {pixels && Object.keys(colorMap).length > 0 && (
+              <button
+                onClick={() => setColorMap({})}
+                style={{
+                  background: "none",
+                  border: `1px solid ${T.sand}`,
+                  borderRadius: 6,
+                  padding: "3px 10px",
+                  fontSize: 10,
+                  color: T.inkSubtle,
+                  cursor: "pointer",
+                  fontFamily: "'DM Mono', monospace",
+                  transition: "border-color 0.15s, color 0.15s",
+                  letterSpacing: "0.05em",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = T.accent;
+                  e.currentTarget.style.color = T.accent;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = T.sand;
+                  e.currentTarget.style.color = T.inkSubtle;
+                }}
+              >
+                초기화
+              </button>
+            )}
           </div>
 
           {pixels ? (
-            /* 사용된 색상 목록 */
             <div
               style={{
                 display: "flex",
@@ -1132,89 +1295,150 @@ export default function CustomPage() {
                 paddingRight: 4,
               }}
             >
-              {colorCounts.map(([hex, count], idx) => (
-                <div
-                  key={hex}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "10px 12px",
-                    background: T.cream,
-                    border: `1px solid ${T.sand}`,
-                    borderRadius: 10,
-                    opacity: 0,
-                    animation: `fadeUp 0.4s cubic-bezier(.22,1,.36,1) ${idx * 25}ms forwards`,
-                  }}
-                >
-                  {/* 스터드 스와치 */}
+              {colorCounts.map(([hex, count], idx) => {
+                const mappedHex = colorMap[hex] || hex;
+                const isEdited = !!colorMap[hex];
+                return (
                   <div
+                    key={hex}
+                    onClick={() => setEditingHex(hex)}
                     style={{
-                      width: 32,
-                      height: 32,
-                      background: hex,
-                      borderRadius: 6,
-                      flexShrink: 0,
-                      boxShadow:
-                        "inset 0 2px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.14)",
-                      position: "relative",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "10px 12px",
+                      background: T.cream,
+                      border: `1px solid ${isEdited ? T.accent : T.sand}`,
+                      borderRadius: 10,
+                      opacity: 0,
+                      animation: `fadeUp 0.4s cubic-bezier(.22,1,.36,1) ${idx * 25}ms forwards`,
+                      cursor: "pointer",
+                      transition: "border-color 0.15s, box-shadow 0.15s",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.boxShadow =
+                        "0 2px 12px rgba(20,18,16,0.1)";
+                      e.currentTarget.style.borderColor = T.accent;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.boxShadow = "none";
+                      e.currentTarget.style.borderColor = isEdited
+                        ? T.accent
+                        : T.sand;
                     }}
                   >
+                    {/* 스워치: 원본 → 교체 표시 */}
+                    <div style={{ position: "relative", flexShrink: 0 }}>
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          background: mappedHex,
+                          borderRadius: 6,
+                          boxShadow:
+                            "inset 0 2px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.14)",
+                          position: "relative",
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: "absolute",
+                            top: "50%",
+                            left: "50%",
+                            transform: "translate(-50%,-58%)",
+                            width: 13,
+                            height: 13,
+                            borderRadius: "50%",
+                            background: mappedHex,
+                            boxShadow:
+                              "inset 0 1px 0 rgba(255,255,255,0.35), 0 1.5px 3px rgba(0,0,0,0.2)",
+                          }}
+                        />
+                      </div>
+                      {/* 원본 색 뱃지 (교체된 경우만 표시) */}
+                      {isEdited && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            bottom: -4,
+                            right: -4,
+                            width: 14,
+                            height: 14,
+                            background: hex,
+                            borderRadius: 3,
+                            border: `1.5px solid ${T.cream}`,
+                          }}
+                        />
+                      )}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 500,
+                          color: T.ink,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {isEdited
+                          ? (LEGO_COLOR_NAMES[mappedHex] ?? mappedHex)
+                          : (LEGO_COLOR_NAMES[hex] ?? hex)}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: isEdited ? T.accent : T.inkSubtle,
+                          marginTop: 1,
+                        }}
+                      >
+                        {isEdited
+                          ? `${hex.toUpperCase()} → ${mappedHex.toUpperCase()}`
+                          : hex.toUpperCase()}
+                      </div>
+                    </div>
                     <div
                       style={{
-                        position: "absolute",
-                        top: "50%",
-                        left: "50%",
-                        transform: "translate(-50%,-58%)",
-                        width: 13,
-                        height: 13,
-                        borderRadius: "50%",
-                        background: hex,
-                        boxShadow:
-                          "inset 0 1px 0 rgba(255,255,255,0.35), 0 1.5px 3px rgba(0,0,0,0.2)",
-                      }}
-                    />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 500,
-                        color: T.ink,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "flex-end",
+                        gap: 4,
+                        flexShrink: 0,
                       }}
                     >
-                      {LEGO_COLOR_NAMES[hex] ?? hex}
-                    </div>
-                    <div
-                      style={{ fontSize: 10, color: T.inkSubtle, marginTop: 1 }}
-                    >
-                      {hex.toUpperCase()}
+                      <div style={{ textAlign: "right" }}>
+                        <div
+                          style={{
+                            fontSize: 17,
+                            fontWeight: 300,
+                            color: T.accent,
+                            lineHeight: 1,
+                            fontFamily: "'DM Mono', monospace",
+                          }}
+                        >
+                          {count}
+                        </div>
+                        <div style={{ fontSize: 10, color: T.inkSubtle }}>
+                          {((count / 1024) * 100).toFixed(1)}%
+                        </div>
+                      </div>
+                      {/* 편집 아이콘 */}
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: T.inkSubtle,
+                          letterSpacing: "0.05em",
+                        }}
+                      >
+                        ✎ 편집
+                      </div>
                     </div>
                   </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 17,
-                        fontWeight: 300,
-                        color: T.accent,
-                        lineHeight: 1,
-                        fontFamily: "'DM Mono', monospace",
-                      }}
-                    >
-                      {count}
-                    </div>
-                    <div style={{ fontSize: 10, color: T.inkSubtle }}>
-                      {((count / 1024) * 100).toFixed(1)}%
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
-            /* 전체 팔레트 미리보기 */
             <>
               <div
                 style={{
@@ -1264,6 +1488,15 @@ export default function CustomPage() {
           to   { opacity:1; transform:translateY(0); }
         }
       `}</style>
+
+      {/* 색상 편집 팝업 */}
+      {editingHex && (
+        <ColorPickerPopup
+          fromHex={editingHex}
+          onSelect={handleColorSelect}
+          onClose={() => setEditingHex(null)}
+        />
+      )}
     </div>
   );
 }
