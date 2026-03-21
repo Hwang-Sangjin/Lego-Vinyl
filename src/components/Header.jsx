@@ -3,7 +3,7 @@ export default function Header({ currentSection, onSectionChange }) {
   const sections = [
     { id: "home", label: "Home" },
     { id: "custom", label: "Custom" },
-    { id: "about", label: "About" },
+    { id: "shop", label: "Shop" },
   ];
 
   return (

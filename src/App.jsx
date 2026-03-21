@@ -4,6 +4,7 @@ import TransitionOverlay from "./components/TransitionOverlay";
 import Home from "./sections/Home";
 import Custom from "./sections/Custom";
 import About from "./sections/About";
+import ShopPage from "./sections/Shop";
 
 export default function App() {
   const [currentSection, setCurrentSection] = useState("home");
@@ -36,7 +37,7 @@ export default function App() {
 
         {currentSection === "custom" && <Custom />}
 
-        {currentSection === "about" && <About />}
+        {currentSection === "shop" && <ShopPage />}
       </main>
 
       <TransitionOverlay trigger={trigger} />
