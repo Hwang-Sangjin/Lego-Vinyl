@@ -18,13 +18,18 @@ const T = {
   accent: "#b85c38",
 };
 
+// ✅ 하늘색/밝은청색 계열 제거 → 흰색이 하늘색으로 매핑되는 문제 해결
+// 제거된 색: #54A9C8 (Maersk Blue), #88C4DC (Bright Light Blue),
+//            #c3d2e0 (Light Bluish Grey), #d0f1ec (Light Aqua), #078BC9 (Dark Azure)
 const LEGO_COLORS = [
+  // Neutrals
   "#000000",
   "#3E3C39",
   "#6D6E6C",
   "#898788",
   "#A19E9F",
   "#FFFFFF",
+  // Browns & Tans
   "#352100",
   "#583927",
   "#7d3d28",
@@ -32,6 +37,7 @@ const LEGO_COLORS = [
   "#CE9E6F",
   "#DFCFAE",
   "#F6D7B3",
+  // Reds & Pinks
   "#720E0F",
   "#C9006B",
   "#7d4f4f",
@@ -41,6 +47,7 @@ const LEGO_COLORS = [
   "#FF6E6E",
   "#FF9ECE",
   "#FECCCF",
+  // Oranges & Yellows
   "#A95500",
   "#96781c",
   "#DC851E",
@@ -48,23 +55,21 @@ const LEGO_COLORS = [
   "#F6D01D",
   "#F5CD30",
   "#C8F94C",
+  // Greens
   "#184632",
   "#00852B",
   "#677430",
   "#4B9F4A",
   "#789F90",
   "#C2DAB8",
-  "#d0f1ec",
+  // Blues (진한 파랑만 유지, 밝은 하늘색 제거)
   "#0A3463",
   "#008590",
   "#0057A6",
-  "#078BC9",
   "#6A739C",
-  "#54A9C8",
+  // Purples
   "#8C71CB",
-  "#88C4DC",
   "#9391E4",
-  "#c3d2e0",
   "#81007B",
   "#6C3082",
   "#A4659A",
@@ -107,17 +112,12 @@ const LEGO_COLOR_NAMES = {
   "#4B9F4A": "Bright Green",
   "#789F90": "Sand Green",
   "#C2DAB8": "Light Green",
-  "#d0f1ec": "Light Aqua",
   "#0A3463": "Dark Blue",
   "#008590": "Dark Turquoise",
   "#0057A6": "Blue",
-  "#078BC9": "Dark Azure",
   "#6A739C": "Sand Blue",
-  "#54A9C8": "Maersk Blue",
   "#8C71CB": "Medium Lavender",
-  "#88C4DC": "Bright Light Blue",
   "#9391E4": "Medium Violet",
-  "#c3d2e0": "Light Bluish Grey",
   "#81007B": "Purple",
   "#6C3082": "Dark Purple",
   "#A4659A": "Sand Purple",
@@ -133,6 +133,7 @@ function hexToRgb(hex) {
   };
 }
 
+// ✅ D65 표준 화이트포인트로 수정 → 흰색/베이지가 올바르게 매핑됨
 function rgbToLab(r, g, b) {
   const lin = (c) => {
     c /= 255;
@@ -144,12 +145,13 @@ function rgbToLab(r, g, b) {
   const X = rl * 0.4124 + gl * 0.3576 + bl * 0.1805;
   const Y = rl * 0.2126 + gl * 0.7152 + bl * 0.0722;
   const Z = rl * 0.0193 + gl * 0.1192 + bl * 0.9505;
+
   const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
-  return [
-    116 * f(Y / 1.0) - 16,
-    500 * (f(X / 0.9505) - f(Y / 1.0)),
-    200 * (f(Y / 1.0) - f(Z / 1.089)),
-  ];
+  const fx = f(X / 0.95047); // D65 화이트포인트
+  const fy = f(Y / 1.0);
+  const fz = f(Z / 1.08883); // D65 화이트포인트
+
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
 }
 
 function nearestLegoColor(r, g, b) {
@@ -204,8 +206,6 @@ function countColors(pixels) {
 
 /* ══════════════════════════════════
    HalftoneGrid
-   셀 클릭 → onCellClick(row, col, domRect) 콜백
-   cellOverrides: { "row,col": hex }
 ══════════════════════════════════ */
 function HalftoneGrid({ pixels, cellOverrides, onCellClick }) {
   const GRID = 32;
@@ -260,14 +260,12 @@ function HalftoneGrid({ pixels, cellOverrides, onCellClick }) {
 
 /* ══════════════════════════════════
    CellPalette
-   클릭된 셀 위치 근처에 뜨는 팔레트 팝오버
 ══════════════════════════════════ */
 function CellPalette({ anchorRect, currentColor, onSelect, onClose }) {
   const ref = useRef(null);
   const POPOVER_W = 212;
-  const POPOVER_H = 180; // 어림값, 실제는 콘텐츠에 따라 다름
+  const POPOVER_H = 180;
 
-  // 뷰포트 기준 위치 계산 — 셀 아래 or 위
   const spaceBelow = window.innerHeight - anchorRect.bottom;
   const top =
     spaceBelow > POPOVER_H + 8
@@ -278,7 +276,6 @@ function CellPalette({ anchorRect, currentColor, onSelect, onClose }) {
     window.innerWidth - POPOVER_W - 8,
   );
 
-  // 바깥 클릭 / ESC 닫기
   useEffect(() => {
     const onDown = (e) => {
       if (ref.current && !ref.current.contains(e.target)) onClose();
@@ -310,7 +307,6 @@ function CellPalette({ anchorRect, currentColor, onSelect, onClose }) {
         zIndex: 500,
       }}
     >
-      {/* 현재 색 표시 */}
       <div
         style={{
           display: "flex",
@@ -335,7 +331,6 @@ function CellPalette({ anchorRect, currentColor, onSelect, onClose }) {
           {LEGO_COLOR_NAMES[currentColor] ?? currentColor}
         </span>
       </div>
-      {/* 팔레트 */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
         {LEGO_COLORS.map((hex) => (
           <div
@@ -900,9 +895,7 @@ export default function CustomPage() {
   const [imageUrl, setImageUrl] = useState(null);
   const [naturalSize, setNaturalSize] = useState(null);
   const [pixels, setPixels] = useState(null);
-  // 셀별 개별 색상 오버라이드: { "row,col": hex }
   const [cellOverrides, setCellOverrides] = useState({});
-  // 팝오버: { row, col, rect } | null
   const [popover, setPopover] = useState(null);
 
   const colorCounts = useMemo(
@@ -1193,7 +1186,6 @@ export default function CustomPage() {
                   />
                 </div>
 
-                {/* 셀 팝오버 */}
                 {popover &&
                   pixels &&
                   (() => {
@@ -1272,7 +1264,6 @@ export default function CustomPage() {
                     animation: `fadeUp 0.4s cubic-bezier(.22,1,.36,1) ${idx * 25}ms forwards`,
                   }}
                 >
-                  {/* 스워치 */}
                   <div
                     style={{
                       width: 32,
